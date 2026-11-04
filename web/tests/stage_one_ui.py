@@ -47,7 +47,12 @@ class DesktopUI(unittest.TestCase):
         self.profiles = []
         self.backups = []
         self.trash = []
-        self.config = {"version": "0.5.0", "host": "127.0.0.1", "port": 8000, "database_path": "/local/profiles.db", "api_key_set": False, "user_auth_enabled": False, "encryption_enabled": True, "cors_origins": [], "camoufox_available": True, "uptime_seconds": 60}
+        self.config = {"version": "0.5.0", "host": "127.0.0.1", "port": 8000, "database_path": "/local/profiles.db", "api_key_set": False, "user_auth_enabled": False, "encryption_enabled": True, "cors_origins": [], "browser_available": True, "browser_version": "146.0.1", "uptime_seconds": 60}
+        self.active = []
+        self.gpus = [
+            {"os": "linux", "gpu": "0x10de:0x2504", "renderer": "ANGLE (NVIDIA Corporation, NVIDIA GeForce RTX 3060/PCIe/SSE2, OpenGL ES 3.2)", "weight": 3},
+            {"os": "linux", "gpu": "0x8086:0x3185", "renderer": "ANGLE (Intel, Mesa Intel(R) UHD Graphics 600 (GLK 2), OpenGL ES 3.2)", "weight": 1},
+        ]
         self.page.route("**/api/v1/**", self.route)
 
     def tearDown(self):
@@ -69,12 +74,23 @@ class DesktopUI(unittest.TestCase):
             data = {"profiles": self.profiles, "total": len(self.profiles), "page": 1, "per_page": 100, "has_next": False, "has_prev": False}
         elif path == "/profiles" and request.method == "POST":
             data = {"id": "new-profile", **request.post_data_json}
+        elif path.startswith("/profiles/") and request.method == "PUT":
+            profile_id = path.split("/")[2]
+            current = next(p for p in self.profiles if p["id"] == profile_id)
+            body = request.post_data_json
+            data = {**current, **{k: v for k, v in body.items() if k != "browser_settings"}, "browser_settings": {**current["browser_settings"], **body["browser_settings"]}, "row_version": current["row_version"] + 1}
+        elif path.startswith("/profiles/") and path.endswith("/machine"):
+            data = {"id": "pinned-machine", "os": {"family": "linux", "version": "Ubuntu 24.04"}}
         elif path == "/groups":
             data = {"groups": [], "total": 0}
         elif path == "/browsers/active":
-            data = {"active_browsers": [], "count": 0}
-        elif path == "/fingerprints/presets":
-            data, envelope = {"presets": []}, True
+            data = {"active_browsers": self.active, "count": len(self.active)}
+        elif path == "/browsers/modes":
+            data = {"default": "headless", "modes": [{"mode": "headless", "available": True, "reason": None}]}
+        elif path.startswith("/fingerprints/gpus"):
+            os_family = path.partition("os=")[2] or None
+            gpus = [g for g in self.gpus if os_family is None or g["os"] == os_family]
+            data, envelope = {"gpus": gpus, "total": len(gpus)}, True
         elif path == "/system/browser":
             data, envelope = self.browser_state, True
         elif path == "/system/browser/install":
@@ -106,22 +122,76 @@ class DesktopUI(unittest.TestCase):
         self.browser_state = {**self.browser_state, "installed": True, "state": "ready", "version": "135", "progress": 100, "message": "Ready"}
         expect(self.page.get_by_role("heading", name="Ready for your first profile")).to_be_visible()
         self.page.get_by_role("button", name="Create first profile", exact=True).click()
-        expect(self.page.get_by_label("Browser interface", exact=True)).not_to_be_visible()
+        expect(self.page.get_by_label("Operating system", exact=True)).to_have_value("linux")
+        expect(self.page.get_by_label("GPU", exact=True)).not_to_be_visible()
         self.page.get_by_text("Advanced browser and fingerprint settings", exact=True).click()
-        self.page.get_by_label("Browser interface", exact=True).select_option("camoufox")
+        gpu = self.page.get_by_label("GPU", exact=True)
+        expect(gpu.locator("option", has_text="NVIDIA GeForce RTX 3060")).to_have_count(1)
+        gpu.select_option(label="NVIDIA GeForce RTX 3060")
+        self.page.get_by_label("Languages", exact=True).fill("de-DE, de")
+        self.page.get_by_label("WebRTC", exact=True).select_option("disable_non_proxied_udp")
         self.page.get_by_label("Name", exact=True).fill("First profile")
         self.page.get_by_role("button", name="Create profile", exact=True).click()
         expect(self.page.get_by_role("dialog")).not_to_be_visible()
         saved = next(json.loads(body) for method, path, body in self.calls if method == "POST" and path == "/profiles")
-        self.assertEqual(saved["browser_settings"]["browser_ui"], "camoufox")
+        self.assertEqual(saved["browser_settings"], {"os": "linux", "gpu": "0x10de:0x2504", "languages": ["de-DE", "de"], "timezone": None, "webrtc_policy": "disable_non_proxied_udp"})
+        self.assertTrue(saved["generate_fingerprint"])
+        self.assertNotIn("fingerprint_preset", saved)
         self.assertEqual(sum(path == "/system/browser/install" for _, path, _ in self.calls), 1)
 
     def test_returning_user_is_not_prompted(self):
         self.browser_state = {**self.browser_state, "installed": True, "state": "ready", "version": "135"}
-        self.profiles = [{"id": "existing", "name": "Existing", "status": "active", "browser_settings": {"os": "windows", "screen": "1920x1080"}, "created_at": "2026-01-01T00:00:00Z", "row_version": 0}]
+        self.profiles = [{"id": "existing", "name": "Existing", "status": "active", "browser_settings": {"os": "linux"}, "created_at": "2026-01-01T00:00:00Z", "row_version": 0}]
         self.page.goto(self.origin)
         expect(self.page.get_by_role("cell", name="Existing", exact=True)).to_be_visible()
         expect(self.page.get_by_role("region", name="Browser setup")).not_to_be_visible()
+
+    def test_edit_shows_machine_and_cdp(self):
+        self.browser_state = {**self.browser_state, "installed": True, "state": "ready", "version": "146.0.1"}
+        self.context.grant_permissions(["clipboard-read", "clipboard-write"], origin=self.origin)
+        fingerprint = {"id": "pinned-machine", "seed": "abc", "os": "linux", "os_version": "Ubuntu 24.04", "platform": "Linux x86_64", "hardware_concurrency": 12, "device_memory": 16, "screen": "1920x1080", "device_pixel_ratio": 1, "gpu": "ANGLE (NVIDIA Corporation, NVIDIA GeForce RTX 3060/PCIe/SSE2, OpenGL ES 3.2)", "gpu_id": "0x10de:0x2504", "font_count": 214, "timezone": "Asia/Tokyo", "languages": ["ja-JP", "ja"], "public_ip": "203.0.113.7", "has_geolocation": True, "browser_version": "146.0.1", "pinned_os": "linux", "settings_os": "linux", "os_mismatch": False}
+        self.profiles = [{"id": "pinned", "name": "Pinned", "status": "active", "browser_settings": {"os": "linux", "gpu": None, "languages": None, "timezone": "Asia/Tokyo", "webrtc_policy": "default"}, "fingerprint": fingerprint, "created_at": "2026-01-01T00:00:00Z", "row_version": 3}]
+        self.active = [{"profile_id": "pinned", "process_id": 1, "started_at": "2026-01-01T00:00:00Z", "vnc": False, "mode": "headless", "cdp": True}]
+        self.page.goto(self.origin)
+
+        self.page.get_by_role("button", name="Actions for Pinned", exact=True).click()
+        self.page.get_by_role("menuitem", name="Copy CDP URL").click()
+        expect(self.page.get_by_text("CDP URL copied", exact=True)).to_be_visible()
+        copied = self.page.evaluate("navigator.clipboard.readText()")
+        self.assertEqual(copied, f"ws://127.0.0.1:{self.server.server_port}/api/v1/profiles/pinned/cdp")
+
+        self.page.get_by_role("button", name="Actions for Pinned", exact=True).click()
+        self.page.get_by_role("menuitem", name="Edit").click()
+        form = self.page.get_by_role("dialog", name="Edit profile")
+        expect(form).to_contain_text("Ubuntu 24.04")
+        expect(form).to_contain_text("1920x1080 @ 1x")
+        expect(form).to_contain_text("16 GB")
+        expect(form).to_contain_text("Phasmid 146.0.1")
+        expect(form).to_contain_text("203.0.113.7")
+        expect(form).to_contain_text("OS and GPU take effect only when the machine is regenerated")
+
+        form.get_by_role("button", name="View machine JSON").click()
+        machine = self.page.get_by_role("dialog", name="Machine JSON")
+        expect(machine).to_contain_text('"id": "pinned-machine"')
+        self.page.keyboard.press("Escape")
+        expect(machine).not_to_be_visible()
+        expect(form).to_be_visible()
+
+        form.get_by_label("GPU", exact=True).select_option("0x10de:0x2504")
+        form.get_by_label("Timezone", exact=True).fill("")
+        form.get_by_role("button", name="Save changes", exact=True).click()
+        expect(form).not_to_be_visible()
+        saved = next(json.loads(body) for method, path, body in self.calls if method == "PUT" and path == "/profiles/pinned")
+        self.assertEqual(saved["browser_settings"], {"os": "linux", "gpu": "0x10de:0x2504", "languages": None, "timezone": None, "webrtc_policy": "default"})
+        self.assertEqual(saved["row_version"], 3)
+
+    def test_schedule_offers_only_launch(self):
+        self.page.route("**/api/v1/schedules", lambda route: route.fulfill(status=200, content_type="application/json", body=json.dumps({"schedules": [], "total": 0})))
+        self.page.goto(f"{self.origin}/schedules/")
+        self.page.get_by_role("button", name="New schedule").first.click()
+        task = self.page.get_by_label("Task", exact=True)
+        expect(task.locator("option")).to_have_count(1)
+        expect(task.locator("option")).to_have_attribute("value", "launch")
 
     def test_release_download_requires_backup_preparation(self):
         self.page.goto(f"{self.origin}/settings/")

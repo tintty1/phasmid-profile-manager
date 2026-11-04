@@ -1,21 +1,25 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { Check, Info, LoaderCircle, RefreshCw, TriangleAlert, X } from 'lucide-react'
+import { createPortal } from 'react-dom'
+import { Braces, Check, Copy, Info, LoaderCircle, RefreshCw, TriangleAlert, X } from 'lucide-react'
 
 import { Modal } from '@/components/modal'
 import { useToast } from '@/components/toast'
 import {
+  fingerprintsAPI,
   hasGeography,
   isStaleWrite,
   OS_LABELS,
-  presetsAPI,
   profilesAPI,
-  type DevicePreset,
+  shortGpu,
   type FingerprintSummary,
+  type GpuChoice,
   type Group,
+  type OsFamily,
   type Profile,
   type ProxyCheck,
+  type WebRTCPolicy,
 } from '@/lib/api'
 
 interface FormState {
@@ -24,18 +28,12 @@ interface FormState {
   status: string
   notes: string
   protected: boolean
-  os: string
-  browserUi: 'desktop' | 'camoufox'
+  os: OsFamily
+  /** "" = any captured GPU. */
+  gpu: string
   timezone: string
   languages: string
-  hardwareConcurrency: string
-  windowWidth: string
-  windowHeight: string
-  webrtcMode: string
-  stableCanvas: boolean
-  geoMode: 'auto' | 'manual'
-  latitude: string
-  longitude: string
+  webrtcPolicy: WebRTCPolicy
   proxyType: string
   proxyServer: string
   proxyUsername: string
@@ -48,48 +46,54 @@ const EMPTY: FormState = {
   status: 'active',
   notes: '',
   protected: false,
-  os: 'windows',
-  browserUi: 'desktop',
+  os: 'linux',
+  gpu: '',
   timezone: '',
   languages: '',
-  hardwareConcurrency: '',
-  windowWidth: '1280',
-  windowHeight: '720',
-  webrtcMode: 'replace',
-  stableCanvas: false,
-  geoMode: 'auto',
-  latitude: '',
-  longitude: '',
+  webrtcPolicy: 'default',
   proxyType: 'http',
   proxyServer: '',
   proxyUsername: '',
   proxyPassword: '',
 }
 
+const WEBRTC_POLICIES: { value: WebRTCPolicy; label: string; hint: string }[] = [
+  {
+    value: 'default',
+    label: 'Default (as stock Chrome)',
+    hint: 'What an ordinary Chrome does: mDNS already hides local addresses, and the machine reports its proxy exit as its public address.',
+  },
+  {
+    value: 'default_public_interface_only',
+    label: 'Public interface only',
+    hint: 'WebRTC uses only the default route and never offers local interface addresses.',
+  },
+  {
+    value: 'default_public_and_private_interfaces',
+    label: 'Public and private interfaces',
+    hint: 'WebRTC uses the default route, including its private address.',
+  },
+  {
+    value: 'disable_non_proxied_udp',
+    label: 'Disable non-proxied UDP',
+    hint: 'WebRTC goes through the proxy or not at all. Calls may fail on proxies without UDP support.',
+  },
+]
+
 function fromProfile(profile: Profile): FormState {
   const bs = profile.browser_settings ?? {}
   const proxy = profile.proxy_config ?? {}
-  const geo = bs.geolocation
-  const lat = geo?.lat ?? geo?.latitude
-  const lon = geo?.lon ?? geo?.longitude
   return {
     name: profile.name,
     group: profile.group ?? '',
     status: profile.status,
     notes: profile.notes ?? '',
     protected: profile.protected ?? false,
-    os: bs.os ?? 'windows',
-    browserUi: bs.browser_ui ?? 'desktop',
+    os: bs.os === 'windows' ? 'windows' : 'linux',
+    gpu: bs.gpu ?? '',
     timezone: bs.timezone ?? '',
     languages: (bs.languages ?? []).join(', '),
-    hardwareConcurrency: bs.hardware_concurrency ? String(bs.hardware_concurrency) : '',
-    windowWidth: String(bs.window_width ?? 1280),
-    windowHeight: String(bs.window_height ?? 720),
-    webrtcMode: bs.webrtc_mode ?? 'replace',
-    stableCanvas: bs.stable_canvas ?? false,
-    geoMode: lat != null && lon != null ? 'manual' : 'auto',
-    latitude: lat != null ? String(lat) : '',
-    longitude: lon != null ? String(lon) : '',
+    webrtcPolicy: bs.webrtc_policy ?? 'default',
     proxyType: proxy.type ?? 'http',
     proxyServer: proxy.server ?? '',
     proxyUsername: proxy.username ?? '',
@@ -136,20 +140,19 @@ export function ProfileForm({ open, profile, groups, onClose, onSaved }: Props) 
   const [form, setForm] = useState<FormState>(EMPTY)
   const [saving, setSaving] = useState(false)
   const [regenerating, setRegenerating] = useState(false)
-  const [refreshingBrowser, setRefreshingBrowser] = useState(false)
   const [checkingProxy, setCheckingProxy] = useState(false)
   const [proxyCheck, setProxyCheck] = useState<ProxyCheck | null>(null)
-  // The `profile` prop is a snapshot from the list; regenerating or updating the
-  // browser returns a new machine, and the panel has to show it without waiting
-  // for the dialog to be reopened.
+  // The `profile` prop is a snapshot from the list; regenerating or reconciling
+  // returns a new machine, and the panel has to show it without waiting for the
+  // dialog to be reopened.
   const [machine, setMachine] = useState<FingerprintSummary | null | undefined>(undefined)
   const [reconciling, setReconciling] = useState(false)
-  // Whether the *saved* profile states where it is. The form fields alone cannot
+  // Whether the *saved* profile states its timezone. The form fields alone cannot
   // answer that once the user has started typing in them.
   const [storedGeography, setStoredGeography] = useState(false)
   const [clearingGeography, setClearingGeography] = useState(false)
-  const [presets, setPresets] = useState<DevicePreset[]>([])
-  const [presetId, setPresetId] = useState('')
+  // GPUs a captured host backs, per OS; empty until the browser is installed.
+  const [gpus, setGpus] = useState<Record<string, GpuChoice[]>>({})
   // The version this form was filled from. Sent with the save so that an edit
   // somebody else made in the meantime is refused instead of being overwritten,
   // and moved on after a refused save so a deliberate second Save can proceed.
@@ -160,41 +163,58 @@ export function ProfileForm({ open, profile, groups, onClose, onSaved }: Props) 
     if (open) {
       // The dialog is kept mounted and refilled when it opens, so the form has
       // to be reset here. A key would avoid the effect, but it would also throw
-      // away the loaded presets on every open and would not refill when the
+      // away the loaded GPU list on every open and would not refill when the
       // same profile is reopened after a save changed it.
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setForm(profile ? fromProfile(profile) : EMPTY)
       setBaseVersion(profile?.row_version ?? 0)
       setMachine(profile?.fingerprint)
       setStoredGeography(profile ? hasGeography(profile) : false)
-      setPresetId('')
     }
   }, [open, profile])
 
-  // Presets only matter while creating: an existing profile is already pinned.
+  // Fetched per OS, and again on the next open while still empty: the list only
+  // fills in once the browser is installed, which may happen with the app open.
+  const gpusLoaded = form.os in gpus && gpus[form.os].length > 0
   useEffect(() => {
-    if (!open || isEdit || presets.length) return
-    presetsAPI
-      .list()
-      .then(setPresets)
-      .catch(() => setPresets([]))
-  }, [open, isEdit, presets.length])
+    if (!open || gpusLoaded) return
+    const os = form.os
+    let cancelled = false
+    fingerprintsAPI
+      .gpus(os)
+      .then((list) => {
+        if (!cancelled) setGpus((current) => ({ ...current, [os]: list }))
+      })
+      .catch(() => {
+        if (!cancelled) setGpus((current) => ({ ...current, [os]: [] }))
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [open, form.os, gpusLoaded])
 
-  const presetsForOs = useMemo(
-    () => presets.filter((preset) => preset.os === form.os),
-    [presets, form.os],
-  )
+  const gpuOptions = useMemo(() => {
+    const list = gpus[form.os] ?? []
+    const named = list.map((choice) => ({ ...choice, name: shortGpu(choice.renderer) }))
+    const counts = new Map<string, number>()
+    for (const choice of named) counts.set(choice.name, (counts.get(choice.name) ?? 0) + 1)
+    return named
+      .map((choice) => ({
+        value: choice.gpu,
+        renderer: choice.renderer,
+        // Two captures can share a card name; the id is what tells them apart.
+        label: (counts.get(choice.name) ?? 0) > 1 ? `${choice.name} (${choice.gpu})` : choice.name,
+      }))
+      .sort((left, right) => left.label.localeCompare(right.label))
+  }, [gpus, form.os])
 
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) =>
     setForm((current) => ({ ...current, [key]: value }))
 
   /**
-   * A key we send is authoritative and a null clears the value, so a blank
-   * optional field has to mean different things in the two modes: on create it
-   * means "let the backend generate this", so the key is omitted; on edit the
-   * user is looking at the stored value and blanking it means "remove it", so
-   * an explicit null goes out. Sending null on create produced profiles with a
-   * missing timezone and geolocation — a fingerprint with holes in it.
+   * Every key is sent: a null means "not chosen" on create (any captured GPU,
+   * follow the proxy) and clears a stored override on edit, which is the same
+   * thing — so a blank field reads the same in both modes.
    */
   function buildBrowserSettings() {
     const languages = form.languages
@@ -202,30 +222,13 @@ export function ProfileForm({ open, profile, groups, onClose, onSaved }: Props) 
       .map((item) => item.trim())
       .filter(Boolean)
 
-    const settings: Record<string, unknown> = {
+    return {
       os: form.os,
-      browser_ui: form.browserUi,
-      window_width: Number(form.windowWidth) || 1280,
-      window_height: Number(form.windowHeight) || 720,
-      webrtc_mode: form.webrtcMode,
-      stable_canvas: form.stableCanvas,
-      // Always explicit: "from the proxy IP" must clear any stored coordinates,
-      // otherwise geoip stays disabled and the old position keeps applying.
-      geolocation:
-        form.geoMode === 'manual' && form.latitude && form.longitude
-          ? { lat: Number(form.latitude), lon: Number(form.longitude) }
-          : null,
+      gpu: form.gpu || null,
+      languages: languages.length ? languages : null,
+      timezone: form.timezone.trim() || null,
+      webrtc_policy: form.webrtcPolicy,
     }
-
-    const optional: [string, unknown][] = [
-      ['timezone', form.timezone.trim() || null],
-      ['languages', languages.length ? languages : null],
-      ['hardware_concurrency', form.hardwareConcurrency ? Number(form.hardwareConcurrency) : null],
-    ]
-    for (const [key, value] of optional) {
-      if (value !== null || isEdit) settings[key] = value
-    }
-    return settings
   }
 
   function buildProxy() {
@@ -266,10 +269,6 @@ export function ProfileForm({ open, profile, groups, onClose, onSaved }: Props) 
       toast('error', 'Name is required')
       return
     }
-    if (form.geoMode === 'manual' && (!form.latitude || !form.longitude)) {
-      toast('error', 'Manual geolocation needs both latitude and longitude')
-      return
-    }
 
     setSaving(true)
     try {
@@ -288,15 +287,11 @@ export function ProfileForm({ open, profile, groups, onClose, onSaved }: Props) 
         await profilesAPI.updateProfile(profile.id, payload)
         toast('ok', 'Profile updated', form.name.trim())
       } else {
-        // The backend generates a consistent fingerprint, then applies these.
+        // Generated now when the browser is installed; otherwise the first
+        // launch generates it from the same settings.
         payload.generate_fingerprint = true
-        if (presetId) payload.fingerprint_preset = presetId
         await profilesAPI.createProfile(payload)
-        toast(
-          'ok',
-          'Profile created',
-          presetId ? `${form.name.trim()} · pinned to a real device` : form.name.trim(),
-        )
+        toast('ok', 'Profile created', form.name.trim())
       }
       onSaved()
       onClose()
@@ -345,25 +340,6 @@ export function ProfileForm({ open, profile, groups, onClose, onSaved }: Props) 
     }
   }
 
-  async function handleRefreshBrowser() {
-    if (!profile) return
-    setRefreshingBrowser(true)
-    try {
-      const updated = await profilesAPI.refreshBrowserVersion(profile.id)
-      setMachine(updated.fingerprint)
-      toast(
-        'ok',
-        `Browser updated to Firefox ${updated.fingerprint?.browser_major}`,
-        'The machine is unchanged.',
-      )
-      onSaved()
-    } catch (err) {
-      toast('error', 'Could not update the browser version', String(err))
-    } finally {
-      setRefreshingBrowser(false)
-    }
-  }
-
   /**
    * Keeping the machine only moves the dropdown; keeping the setting replaces the
    * hardware, so the two are reported very differently even though one call does
@@ -376,7 +352,7 @@ export function ProfileForm({ open, profile, groups, onClose, onSaved }: Props) 
     try {
       const updated = await profilesAPI.reconcileOs(profile.id, keepMachine)
       setMachine(updated.fingerprint)
-      set('os', updated.browser_settings.os)
+      set('os', updated.browser_settings.os === 'windows' ? 'windows' : 'linux')
       toast(
         'ok',
         keepMachine
@@ -399,12 +375,12 @@ export function ProfileForm({ open, profile, groups, onClose, onSaved }: Props) 
     setClearingGeography(true)
     try {
       await profilesAPI.clearGeography([profile.id])
-      setForm((current) => ({ ...current, timezone: '', geoMode: 'auto', latitude: '', longitude: '' }))
+      setForm((current) => ({ ...current, timezone: '' }))
       setStoredGeography(false)
-      toast('ok', 'Timezone and coordinates cleared', 'Both now follow the proxy.')
+      toast('ok', 'Timezone cleared', "The next launch moves the machine to the proxy's exit.")
       onSaved()
     } catch (err) {
-      toast('error', 'Could not clear the geography', String(err))
+      toast('error', 'Could not clear the timezone', String(err))
     } finally {
       setClearingGeography(false)
     }
@@ -504,21 +480,23 @@ export function ProfileForm({ open, profile, groups, onClose, onSaved }: Props) 
               id="pf-os"
               className="field"
               value={form.os}
-              onChange={(e) => set('os', e.target.value)}
+              onChange={(e) =>
+                // GPU ids are captured per OS, so a choice for one is not offered by the other.
+                setForm((current) => ({ ...current, os: e.target.value as OsFamily, gpu: '' }))
+              }
             >
-              <option value="windows">Windows</option>
-              <option value="macos">macOS</option>
               <option value="linux">Linux</option>
+              <option value="windows">Windows</option>
             </select>
             {/* Once a machine is pinned this setting is not what a page sees, so
                 the honest warning is stronger than "the rest stays as it was". */}
-            {isEdit && form.os !== (profile.browser_settings?.os ?? 'windows') && (
+            {isEdit && form.os !== (profile.browser_settings?.os ?? 'linux') && (
               <p className="mt-1.5 text-ink-faint">
                 {machine?.pinned_os
                   ? `Saving this changes nothing a page can see: the pinned machine reports ${
                       OS_LABELS[machine.pinned_os] ?? machine.pinned_os
                     } and keeps doing so. The Machine panel then offers both ways out.`
-                  : 'Screen size, locale and fonts stay as they were. Use Regenerate fingerprint for a set that matches the new OS.'}
+                  : 'The machine is generated for this OS on the first launch.'}
               </p>
             )}
           </div>
@@ -634,14 +612,13 @@ export function ProfileForm({ open, profile, groups, onClose, onSaved }: Props) 
             />
           </div>
 
-          {/* Firefox refuses SOCKS credentials outright, so the browser would
-              fail to start rather than fall back — say so before that happens. */}
-          {form.proxyType.startsWith('socks') &&
+          {/* SOCKS4 has no password authentication at all, so the launch would
+              be refused rather than go out unauthenticated — say so first. */}
+          {form.proxyType === 'socks4' &&
             (form.proxyUsername.trim() || form.proxyPassword.trim()) && (
               <p className="col-span-2 text-danger">
-                Firefox cannot authenticate to a SOCKS proxy, so this profile will fail to launch.
-                Use an HTTP or HTTPS proxy for credentials, or a SOCKS proxy that allows this IP
-                without them.
+                SOCKS4 cannot carry a username or password, so this profile will fail to launch.
+                Use SOCKS5, HTTP or HTTPS for credentials.
               </p>
             )}
 
@@ -667,69 +644,56 @@ export function ProfileForm({ open, profile, groups, onClose, onSaved }: Props) 
           <summary className="cursor-pointer font-medium">Advanced browser and fingerprint settings</summary>
           <p className="mb-4 mt-1 text-ink-dim">Defaults are ready to use. Change these only when a profile needs a specific setup.</p>
           <div className="flex flex-col gap-5">
-          <div>
-            <label className="field-label" htmlFor="pf-browser-ui">Browser interface</label>
-            <select id="pf-browser-ui" className="field" value={form.browserUi} onChange={(event) => set('browserUi', event.target.value as FormState['browserUi'])}>
-              <option value="desktop">Desktop (standard tabs and controls)</option>
-              <option value="camoufox">Camoufox (minimal)</option>
-            </select>
-            <p className="mt-1.5 text-ink-dim">Controls the browser window interface. It does not change the operating system websites see in your fingerprint.</p>
-          </div>
-        {isEdit ? (
+        {isEdit && (
           <PinnedMachine
+            profileId={profile.id}
             fingerprint={machine}
-            onRefreshBrowser={handleRefreshBrowser}
-            refreshing={refreshingBrowser}
             onReconcileOs={handleReconcileOs}
             reconciling={reconciling}
           />
-        ) : (
-          <fieldset>
-            <legend className="mb-0.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-faint">
-              Machine
-            </legend>
-            <p className="mb-2.5 text-ink-faint">
-              A generated fingerprint is internally consistent; a preset is a combination that
-              genuinely exists. Either way the profile keeps it for good.
-            </p>
-            <select
-              className="field"
-              value={presetId}
-              onChange={(event) => setPresetId(event.target.value)}
-              aria-label="Device preset"
-            >
-              <option value="">Generate one automatically</option>
-              {presetsForOs.map((preset) => (
-                <option key={preset.id} value={preset.id}>
-                  {[preset.screen, `${preset.hardware_concurrency} cores`, shortGpu(preset.gpu)]
-                    .filter(Boolean)
-                    .join(' · ')}
-                </option>
-              ))}
-            </select>
-            {presetsForOs.length > 0 && (
-              <p className="mt-1.5 text-ink-faint">
-                {presetsForOs.length} real {form.os} devices available.
-              </p>
-            )}
-          </fieldset>
         )}
 
         <Section
           title="Fingerprint"
-          hint="Camoufox keeps the fingerprint internally consistent; only override what you need."
+          hint={
+            isEdit && machine
+              ? 'OS and GPU take effect only when the machine is regenerated: save, then Regenerate fingerprint. Languages, timezone and WebRTC apply at the next launch.'
+              : 'Phasmid generates one consistent machine from these — screen, GPU, cores, fonts — and the profile keeps it for good.'
+          }
         >
-          <div>
-            <label className="field-label" htmlFor="pf-tz">
-              Timezone
+          <div className="col-span-2">
+            <label className="field-label" htmlFor="pf-gpu">
+              GPU
             </label>
-            <input
-              id="pf-tz"
-              className="field font-mono"
-              value={form.timezone}
-              onChange={(e) => set('timezone', e.target.value)}
-              placeholder="Europe/Berlin"
-            />
+            <select
+              id="pf-gpu"
+              className="field"
+              value={form.gpu}
+              onChange={(e) => set('gpu', e.target.value)}
+            >
+              <option value="">Any captured GPU</option>
+              {gpuOptions.map((option) => (
+                <option key={option.value} value={option.value} title={option.renderer}>
+                  {option.label}
+                </option>
+              ))}
+              {/* A stored choice the list does not offer (browser not installed
+                  yet, or a capture since dropped) still has to read as itself,
+                  or saving would silently clear it. */}
+              {form.gpu && !gpuOptions.some((option) => option.value === form.gpu) && (
+                <option value={form.gpu}>{form.gpu}</option>
+              )}
+            </select>
+            <p className="mt-1.5 text-ink-faint">
+              {gpuOptions.length
+                ? `${gpuOptions.length} ${OS_LABELS[form.os] ?? form.os} GPUs backed by a captured machine. Any draws one, weighted by how common it is.`
+                : 'The list fills in once the browser is installed. Any draws one from the captured machines.'}
+            </p>
+            {isEdit && machine?.gpu_id && form.gpu && form.gpu !== machine.gpu_id && (
+              <p className="mt-1.5 text-ink-faint">
+                The pinned machine keeps its current GPU until it is regenerated.
+              </p>
+            )}
           </div>
 
           <div>
@@ -741,148 +705,63 @@ export function ProfileForm({ open, profile, groups, onClose, onSaved }: Props) 
               className="field font-mono"
               value={form.languages}
               onChange={(e) => set('languages', e.target.value)}
-              placeholder="en-US, en"
+              placeholder="From the proxy"
+              aria-describedby="pf-langs-hint"
             />
+            <p id="pf-langs-hint" className="mt-1.5 text-ink-faint">
+              Comma-separated, e.g. en-US, en. Blank follows the proxy.
+            </p>
           </div>
 
           <div>
-            <label className="field-label" htmlFor="pf-cores">
-              CPU cores
+            <label className="field-label" htmlFor="pf-tz">
+              Timezone
             </label>
             <input
-              id="pf-cores"
-              type="number"
-              min={1}
-              max={32}
-              className="field"
-              value={form.hardwareConcurrency}
-              onChange={(e) => set('hardwareConcurrency', e.target.value)}
-              placeholder="auto"
+              id="pf-tz"
+              className="field font-mono"
+              value={form.timezone}
+              onChange={(e) => set('timezone', e.target.value)}
+              placeholder="From the proxy"
+              aria-describedby="pf-tz-hint"
             />
+            <p id="pf-tz-hint" className="mt-1.5 text-ink-faint">
+              An IANA zone, e.g. Europe/Berlin. Blank follows the proxy.
+            </p>
           </div>
 
-          <div>
+          <div className="col-span-2">
             <label className="field-label" htmlFor="pf-webrtc">
               WebRTC
             </label>
             <select
               id="pf-webrtc"
               className="field"
-              value={form.webrtcMode}
-              onChange={(e) => set('webrtcMode', e.target.value)}
+              value={form.webrtcPolicy}
+              onChange={(e) => set('webrtcPolicy', e.target.value as WebRTCPolicy)}
             >
-              <option value="replace">Replace with proxy IP</option>
-              <option value="real">Use the real IP</option>
-              <option value="forward">Forward</option>
-              <option value="none">Disable WebRTC</option>
-            </select>
-          </div>
-
-          <div className="col-span-2">
-            <label className="field-label" htmlFor="pf-canvas">
-              Canvas
-            </label>
-            <select
-              id="pf-canvas"
-              className="field"
-              value={form.stableCanvas ? 'stable' : 'randomised'}
-              onChange={(e) => set('stableCanvas', e.target.value === 'stable')}
-            >
-              <option value="randomised">Randomised each session (default)</option>
-              <option value="stable">Same canvas every launch</option>
+              {WEBRTC_POLICIES.map((policy) => (
+                <option key={policy.value} value={policy.value}>
+                  {policy.label}
+                </option>
+              ))}
             </select>
             <p className="mt-1.5 text-ink-faint">
-              {form.stableCanvas
-                ? 'Reads the same to a site across launches, like real hardware — but also the same on every site, so sites can link this profile between them.'
-                : "A site sees a different canvas each session, and a different one per site. Safer against tracking, but a long-lived account looks like new hardware every visit."}
+              {WEBRTC_POLICIES.find((policy) => policy.value === form.webrtcPolicy)?.hint}
             </p>
           </div>
 
-          <div>
-            <label className="field-label" htmlFor="pf-win-w">
-              Window width
-            </label>
-            <input
-              id="pf-win-w"
-              type="number"
-              className="field"
-              value={form.windowWidth}
-              onChange={(e) => set('windowWidth', e.target.value)}
-            />
-          </div>
-
-          <div>
-            <label className="field-label" htmlFor="pf-win-h">
-              Window height
-            </label>
-            <input
-              id="pf-win-h"
-              type="number"
-              className="field"
-              value={form.windowHeight}
-              onChange={(e) => set('windowHeight', e.target.value)}
-            />
-          </div>
-
-          <div>
-            <label className="field-label" htmlFor="pf-geo">
-              Geolocation
-            </label>
-            <select
-              id="pf-geo"
-              className="field"
-              value={form.geoMode}
-              onChange={(e) => set('geoMode', e.target.value as 'auto' | 'manual')}
-            >
-              <option value="auto">From the proxy IP</option>
-              <option value="manual">Set coordinates</option>
-            </select>
-          </div>
-
-          {form.geoMode === 'manual' && (
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="field-label" htmlFor="pf-lat">
-                  Latitude
-                </label>
-                <input
-                  id="pf-lat"
-                  className="field font-mono"
-                  value={form.latitude}
-                  onChange={(e) => set('latitude', e.target.value)}
-                  placeholder="52.52"
-                />
-              </div>
-              <div>
-                <label className="field-label" htmlFor="pf-lon">
-                  Longitude
-                </label>
-                <input
-                  id="pf-lon"
-                  className="field font-mono"
-                  value={form.longitude}
-                  onChange={(e) => set('longitude', e.target.value)}
-                  placeholder="13.405"
-                />
-              </div>
-            </div>
-          )}
-
-          {/* Until recently every new profile was given the timezone and
-              coordinates of a randomly chosen region, so an old one can claim
-              Shanghai on a German proxy. Nothing recorded which values were
-              chosen and which were rolled, so this is offered whenever both are
-              set rather than guessed at. */}
+          {/* A stated timezone wins over the proxy at every launch, so a profile
+              moved to a proxy elsewhere keeps claiming the old zone. Offered
+              whenever one is stored, since nothing records why it was set. */}
           {isEdit && storedGeography && (
             <div className="col-span-2 rounded-md border border-line bg-raised p-2.5">
               <p className="text-ink">
-                This profile states where it is instead of taking it from its proxy.
+                This profile states its timezone instead of taking it from its proxy.
               </p>
               <p className="mt-0.5 text-ink-faint">
-                A profile created today leaves both unset, so Camoufox derives the timezone, the
-                coordinates and the WebRTC address from the exit address. Profiles created earlier
-                were given a randomly chosen region, and nothing records which values were a
-                choice — so clear them if this one was not.
+                Cleared, the next launch moves the machine to the proxy&apos;s exit address — its
+                zone, position and WebRTC address. Languages and the hardware stay.
               </p>
               <div className="mt-2 flex justify-end">
                 <button
@@ -892,7 +771,7 @@ export function ProfileForm({ open, profile, groups, onClose, onSaved }: Props) 
                   disabled={clearingGeography}
                 >
                   {clearingGeography && <LoaderCircle size={13} className="animate-spin" />}
-                  Clear both, follow the proxy
+                  Clear timezone, follow the proxy
                 </button>
               </div>
             </div>
@@ -906,41 +785,45 @@ export function ProfileForm({ open, profile, groups, onClose, onSaved }: Props) 
 }
 
 /**
- * Reduce a renderer string to the card name.
- *
- *   "ANGLE (NVIDIA, NVIDIA GeForce GTX 980 Direct3D11 vs_5_0 ps_5_0)" -> "NVIDIA GeForce GTX 980"
- *   "Apple M1, or similar"                                           -> "Apple M1"
- *
- * Unwrapping ANGLE first matters: vendor names contain their own brackets
- * ("Intel(R) HD Graphics"), so cutting at the first one truncates the name.
- */
-function shortGpu(gpu?: string | null): string {
-  if (!gpu) return ''
-  // Drop Camoufox's ", or similar" suffix before unwrapping, or the closing
-  // bracket of the ANGLE wrapper is no longer at the end of the string.
-  const base = gpu.replace(/,\s*or similar\s*$/i, '')
-  const angle = base.match(/^ANGLE \([^,]+,\s*(.*)\)$/)
-  const name = angle ? angle[1] : base
-  return name.split(/\s+Direct3D|\s+vs_/)[0].trim()
-}
-
-/**
  * The machine a profile is pinned to. Without this the profile would look like
  * different hardware every session, so it is worth showing that it does not.
  */
 function PinnedMachine({
+  profileId,
   fingerprint,
-  onRefreshBrowser,
-  refreshing,
   onReconcileOs,
   reconciling,
 }: {
+  profileId: string
   fingerprint?: FingerprintSummary | null
-  onRefreshBrowser: () => void
-  refreshing: boolean
   onReconcileOs: (keepMachine: boolean) => void
   reconciling: boolean
 }) {
+  const [json, setJson] = useState<string | null>(null)
+  const [loadingJson, setLoadingJson] = useState(false)
+  const toast = useToast()
+
+  async function viewJson() {
+    setLoadingJson(true)
+    try {
+      setJson(JSON.stringify(await profilesAPI.getMachine(profileId), null, 2))
+    } catch (err) {
+      toast('error', 'Could not load the machine', String(err))
+    } finally {
+      setLoadingJson(false)
+    }
+  }
+
+  async function copyJson() {
+    if (!json) return
+    try {
+      await navigator.clipboard.writeText(json)
+      toast('ok', 'Machine JSON copied')
+    } catch {
+      toast('error', 'Could not copy', 'Select the text and copy it instead.')
+    }
+  }
+
   if (!fingerprint) {
     return (
       <fieldset>
@@ -948,20 +831,35 @@ function PinnedMachine({
           Machine
         </legend>
         <p className="text-ink-faint">
-          Assigned on the first launch, then reused every time so this profile stays the same
+          Generated on the first launch, then reused every time so this profile stays the same
           computer.
         </p>
       </fieldset>
     )
   }
 
+  const screen = fingerprint.screen
+    ? fingerprint.device_pixel_ratio
+      ? `${fingerprint.screen} @ ${fingerprint.device_pixel_ratio}x`
+      : fingerprint.screen
+    : null
+
   const rows: [string, string | number | null | undefined][] = [
-    ['Browser', fingerprint.browser_major ? `Firefox ${fingerprint.browser_major}` : null],
-    ['Screen', fingerprint.screen],
-    ['CPU cores', fingerprint.hardware_concurrency],
+    [
+      'OS',
+      fingerprint.os
+        ? [osLabel(fingerprint.os), fingerprint.os_version].filter(Boolean).join(' ')
+        : null,
+    ],
+    ['Browser', fingerprint.browser_version ? `Phasmid ${fingerprint.browser_version}` : null],
+    ['Screen', screen],
+    ['CPU threads', fingerprint.hardware_concurrency],
+    ['Memory', fingerprint.device_memory != null ? `${fingerprint.device_memory} GB` : null],
     ['GPU', fingerprint.gpu],
     ['Fonts', fingerprint.font_count],
-    ['User agent', fingerprint.user_agent],
+    ['Timezone', fingerprint.timezone],
+    ['Languages', fingerprint.languages?.length ? fingerprint.languages.join(', ') : null],
+    ['Exit / WebRTC', fingerprint.public_ip],
   ]
 
   return (
@@ -969,10 +867,25 @@ function PinnedMachine({
       <legend className="mb-0.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-faint">
         Machine
       </legend>
-      <p className="mb-2.5 text-ink-faint">
-        Pinned across launches — {fingerprint.property_count} properties. Regenerate the
-        fingerprint to move this profile to different hardware.
-      </p>
+      <div className="mb-2.5 flex items-start justify-between gap-3">
+        <p className="text-ink-faint">
+          Pinned across launches. Each launch moves it to the proxy&apos;s exit address; the
+          hardware stays. Regenerate the fingerprint to move this profile to different hardware.
+        </p>
+        <button
+          type="button"
+          className="btn btn-default shrink-0"
+          onClick={viewJson}
+          disabled={loadingJson}
+        >
+          {loadingJson ? (
+            <LoaderCircle size={13} className="animate-spin" />
+          ) : (
+            <Braces size={13} aria-hidden="true" />
+          )}
+          View machine JSON
+        </button>
+      </div>
       <div className="panel divide-y divide-line">
         {rows
           .filter(([, value]) => value !== null && value !== undefined && value !== '')
@@ -983,34 +896,6 @@ function PinnedMachine({
             </div>
           ))}
       </div>
-
-      {/* A pin never ages by itself. A profile kept for months keeps claiming the
-          browser it was created with, and a version well behind is itself odd —
-          so offer the update a real machine would have taken. */}
-      {fingerprint.browser_outdated && (
-        <div className="mt-2 flex items-start gap-2.5 rounded-md border border-line bg-raised p-2.5">
-          <TriangleAlert size={14} className="mt-0.5 shrink-0 text-signal" />
-          <div className="flex-1">
-            <p className="text-ink">
-              This profile still reports Firefox {fingerprint.browser_major}; the installed browser
-              is {fingerprint.installed_major}.
-            </p>
-            <p className="mt-0.5 text-ink-faint">
-              Updating changes only the browser version. The screen, GPU, cores, fonts and canvas
-              stay exactly as they are — the same computer, with its browser updated.
-            </p>
-          </div>
-          <button
-            type="button"
-            className="btn btn-default shrink-0"
-            onClick={onRefreshBrowser}
-            disabled={refreshing}
-          >
-            {refreshing && <LoaderCircle size={13} className="animate-spin" />}
-            Update
-          </button>
-        </div>
-      )}
 
       {/* The OS dropdown can be changed long after the machine was pinned, and
           nothing stops it — the pin is what a page sees, so the setting simply
@@ -1055,6 +940,35 @@ function PinnedMachine({
           </div>
         </div>
       )}
+
+      {/* Portalled out of the profile dialog: inside it, the dialog's form and
+          scroll container would hold this one too. */}
+      {json !== null &&
+        createPortal(
+          <Modal
+            open
+            title="Machine JSON"
+            subtitle="The Phasmid profile this profile launches with, apart from the location each launch moves it to."
+            onClose={() => setJson(null)}
+            width={760}
+            footer={
+              <>
+                <button type="button" className="btn btn-default mr-auto" onClick={copyJson}>
+                  <Copy size={13} aria-hidden="true" />
+                  Copy
+                </button>
+                <button type="button" className="btn btn-default" onClick={() => setJson(null)}>
+                  Close
+                </button>
+              </>
+            }
+          >
+            <pre className="whitespace-pre-wrap break-all font-mono text-[11.5px] leading-relaxed text-ink">
+              {json}
+            </pre>
+          </Modal>,
+          document.body,
+        )}
     </fieldset>
   )
 }

@@ -13,6 +13,11 @@ interface ModalProps {
   width?: number
 }
 
+// Open dialogs, innermost last. Every dialog listens on the document, so a
+// dialog opened from another (the machine JSON from the profile form) would
+// otherwise have one Escape close both, and both fight over Tab.
+const openDialogs: object[] = []
+
 /**
  * Dialog shell. Closes on Escape and on backdrop click, moves focus inside on
  * open, and locks background scroll — the old modal did none of these.
@@ -34,6 +39,8 @@ export function Modal({ open, title, subtitle, onClose, children, footer, width 
 
     const panel = panelRef.current
     const previouslyFocused = document.activeElement as HTMLElement | null
+    const token = {}
+    openDialogs.push(token)
 
     const focusable = () =>
       Array.from(
@@ -43,6 +50,7 @@ export function Modal({ open, title, subtitle, onClose, children, footer, width 
       ).filter((element) => element.offsetParent !== null)
 
     const onKeyDown = (event: KeyboardEvent) => {
+      if (openDialogs[openDialogs.length - 1] !== token) return
       if (event.key === 'Escape') {
         onCloseRef.current()
         return
@@ -71,6 +79,7 @@ export function Modal({ open, title, subtitle, onClose, children, footer, width 
     if (!panel?.contains(document.activeElement)) panel?.focus()
 
     return () => {
+      openDialogs.splice(openDialogs.indexOf(token), 1)
       document.removeEventListener('keydown', onKeyDown)
       document.body.style.overflow = previousOverflow
       previouslyFocused?.focus?.()

@@ -41,7 +41,7 @@ import {
   groupsAPI,
   hasGeography,
   OS_LABELS,
-  playwrightUrl,
+  cdpUrl,
   profilesAPI,
   readProxyCheck,
   type ActiveBrowser,
@@ -77,7 +77,7 @@ export default function ProfilesPage() {
   // Running profiles the server shows on a VNC display, and the one being viewed.
   const [viewable, setViewable] = useState<Set<string>>(new Set())
   const [viewing, setViewing] = useState<Profile | null>(null)
-  // What each running browser is (mode, Playwright), and what this server can launch.
+  // What each running browser is (mode, CDP), and what this server can launch.
   const [active, setActive] = useState<Map<string, ActiveBrowser>>(new Map())
   const [modes, setModes] = useState<BrowserModes | null>(null)
   const [loading, setLoading] = useState(true)
@@ -272,13 +272,15 @@ export default function ProfilesPage() {
     }
   }
 
-  async function copyPlaywrightUrl(profile: Profile) {
-    const url = playwrightUrl(profile.id)
+  async function copyCdpUrl(profile: Profile) {
+    const url = cdpUrl(profile.id)
+    const hint =
+      'Connect with chromium.connect_over_cdp(url) in Playwright, or puppeteer.connect({ browserWSEndpoint: url }).'
     try {
       await navigator.clipboard.writeText(url)
-      toast('ok', 'Playwright URL copied', 'Connect with firefox.connect(url).')
+      toast('ok', 'CDP URL copied', hint)
     } catch {
-      toast('info', 'Playwright URL', url)
+      toast('info', 'CDP URL', url)
     }
   }
 
@@ -346,7 +348,7 @@ export default function ProfilesPage() {
     try {
       const blob = await profilesAPI.exportArchive(profile.id)
       const safe = profile.name.replace(/[^A-Za-z0-9_.-]+/g, '-').replace(/^-|-$/g, '')
-      download(blob, `${safe || profile.id}.camoufox.zip`)
+      download(blob, `${safe || profile.id}.phasmid.zip`)
       toast(
         'ok',
         'Profile exported',
@@ -521,19 +523,19 @@ export default function ProfilesPage() {
   }
 
   /**
-   * The profiles this exists for were all created the same way — with the
-   * timezone and coordinates of a randomly chosen region — so the useful unit is
-   * a selection, not one profile at a time. Only those that actually state a
-   * location are named, so the confirmation says what will really change.
+   * A stated timezone wins over the proxy at every launch, so profiles moved to
+   * proxies elsewhere tend to need it cleared together — the useful unit is a
+   * selection, not one profile at a time. Only those that actually state one
+   * are named, so the confirmation says what will really change.
    */
   function askClearGeography() {
     const ids = profiles.filter((p) => selected.has(p.id) && hasGeography(p)).map((p) => p.id)
     setConfirm({
-      title: `Clear geography of ${ids.length} profile${ids.length === 1 ? '' : 's'}`,
+      title: `Clear the timezone of ${ids.length} profile${ids.length === 1 ? '' : 's'}`,
       body:
-        'The stored timezone and coordinates are unset, so Camoufox derives both — and the ' +
-        'WebRTC address — from where each profile\'s proxy comes out, as a profile created ' +
-        'today does. Languages and the pinned machine are untouched.',
+        'The stored timezone is unset, so the next launch moves each machine to where its ' +
+        'proxy comes out — zone, position and WebRTC address. Languages and the hardware ' +
+        'are untouched.',
       label: 'Clear',
       run: async () => {
         const result = await profilesAPI.clearGeography(ids)
@@ -575,12 +577,12 @@ export default function ProfilesPage() {
       const url = URL.createObjectURL(blob)
       const link = document.createElement('a')
       link.href = url
-      link.download = 'camoufox-profiles.xlsx'
+      link.download = 'phasmid-profiles.xlsx'
       document.body.appendChild(link)
       link.click()
       link.remove()
       URL.revokeObjectURL(url)
-      toast('ok', 'Exported to camoufox-profiles.xlsx', 'The file contains proxy passwords in clear text.')
+      toast('ok', 'Exported to phasmid-profiles.xlsx', 'The file contains proxy passwords in clear text.')
     } catch (err) {
       toast('error', 'Export failed', String(err))
     }
@@ -709,7 +711,7 @@ export default function ProfilesPage() {
           {selectedWithGeography > 0 && (
             <button className="btn btn-default h-7" onClick={askClearGeography}>
               <Globe size={13} />
-              Clear geography ({selectedWithGeography})
+              Clear timezone ({selectedWithGeography})
             </button>
           )}
           <button className="btn btn-danger h-7" onClick={askBulkDelete}>
@@ -1005,12 +1007,12 @@ export default function ProfilesPage() {
                                 closeMenu(profile.id)
                               }}
                             />
-                            {active.get(profile.id)?.playwright && (
+                            {active.get(profile.id)?.cdp && (
                               <MenuItem
                                 icon={<Terminal size={13} />}
-                                label="Copy Playwright URL"
+                                label="Copy CDP URL"
                                 onClick={() => {
-                                  copyPlaywrightUrl(profile)
+                                  copyCdpUrl(profile)
                                   closeMenu(profile.id)
                                 }}
                               />

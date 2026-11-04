@@ -31,7 +31,7 @@ export function UpdateSettings() {
       const result = await systemAPI.prepareUpdate()
       if (!isReleaseLink(result.release_url)) throw new Error('The server returned an unverified release link. Check for updates again.')
       setPrepared({ url: result.release_url, count: result.backup_count, message: result.message })
-      window.dispatchEvent(new Event('camoufox-backups-changed'))
+      window.dispatchEvent(new Event('phasmid-backups-changed'))
     } catch (err) { setError(message(err)) }
     finally { setPreparing(false) }
   }
@@ -60,7 +60,7 @@ export function UpdateSettings() {
 function isReleaseLink(url: string): boolean {
   try {
     const parsed = new URL(url)
-    return parsed.protocol === 'https:' && parsed.hostname === 'github.com' && /^\/polyackiy\/phasmid-profile-manager\/releases\/tag\/[^/]+\/?$/.test(parsed.pathname) && !parsed.username && !parsed.password
+    return parsed.protocol === 'https:' && parsed.hostname === 'github.com' && /^\/tintty1\/phasmid-profile-manager\/releases\/tag\/[^/]+\/?$/.test(parsed.pathname) && !parsed.username && !parsed.password
   } catch { return false }
 }
 
@@ -81,8 +81,8 @@ export function BackupSettings() {
     // The request completes asynchronously; this effect starts the initial API read.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     load()
-    window.addEventListener('camoufox-backups-changed', load)
-    return () => window.removeEventListener('camoufox-backups-changed', load)
+    window.addEventListener('phasmid-backups-changed', load)
+    return () => window.removeEventListener('phasmid-backups-changed', load)
   }, [load])
   async function create() {
     setBusy(true); setError(null); setResult(null)

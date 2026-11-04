@@ -9,32 +9,29 @@ export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? ''
 // aliases for older scripts; the bundled UI always talks to the current one.
 const API_PREFIX = '/api/v1'
 
+export type OsFamily = 'linux' | 'windows'
+
+/** Chrome's WebRTC IP handling policy. */
+export type WebRTCPolicy =
+  | 'default'
+  | 'default_public_interface_only'
+  | 'default_public_and_private_interfaces'
+  | 'disable_non_proxied_udp'
+
+/**
+ * What a person chooses about a profile's machine; Phasmid generates the rest.
+ *
+ * `os` and `gpu` pick the hardware and only take effect when a machine is
+ * generated. `languages` and `timezone` unset follow the proxy's exit address,
+ * which is the normal case; set, they win over it on the next launch.
+ */
 export interface BrowserSettings {
-  browser_ui?: 'desktop' | 'camoufox'
-  os: string
-  screen: string
-  user_agent?: string | null
-  languages?: string[]
+  os: OsFamily
+  /** "<vendor_id>:<device_id>", e.g. 0x10de:0x2504; null = drawn from the captured devices. */
+  gpu?: string | null
+  languages?: string[] | null
   timezone?: string | null
-  locale?: string | null
-  window_width?: number | null
-  window_height?: number | null
-  geolocation?: {
-    lat?: number
-    lon?: number
-    latitude?: number
-    longitude?: number
-    accuracy?: number
-  } | null
-  hardware_concurrency?: number | null
-  device_memory?: number | null
-  max_touch_points?: number
-  webrtc_mode?: string
-  /** Keep the canvas reproducible across launches, at the cost of cross-site unlinkability. */
-  stable_canvas?: boolean
-  canvas_noise?: boolean
-  webgl_noise?: boolean
-  audio_noise?: boolean
+  webrtc_policy?: WebRTCPolicy
 }
 
 export interface ProxyConfig {
@@ -47,19 +44,29 @@ export interface ProxyConfig {
 
 /** A short description of the machine a profile is pinned to. */
 export interface FingerprintSummary {
-  user_agent?: string | null
+  id?: string | null
+  seed?: string | null
+  os?: string | null
+  os_version?: string | null
   platform?: string | null
   hardware_concurrency?: number | null
+  /** navigator.deviceMemory, in GB. */
+  device_memory?: number | null
+  /** "<width>x<height>" */
   screen?: string | null
+  device_pixel_ratio?: number | null
+  /** The WebGL renderer string pages see. */
   gpu?: string | null
+  /** "<vendor_id>:<device_id>" of the pinned GPU. */
+  gpu_id?: string | null
   font_count?: number | null
-  property_count?: number
-  /** Firefox major version this pin claims. */
-  browser_major?: number | null
-  /** Firefox major version of the browser on disk. */
-  installed_major?: number | null
-  /** The pin claims an older browser than the one installed. */
-  browser_outdated?: boolean
+  timezone?: string | null
+  languages?: string[] | null
+  /** The exit (and WebRTC) address the machine was last moved to. */
+  public_ip?: string | null
+  has_geolocation?: boolean
+  /** The Phasmid version installed, which is the one the machine reports. */
+  browser_version?: string | null
   /** The OS the pinned machine itself reports. */
   pinned_os?: string | null
   /** The OS the profile's settings ask for. */
@@ -280,8 +287,9 @@ export const profilesAPI = {
     return request<Profile>(`${API_PREFIX}/profiles/${id}/reset-fingerprint`, { method: 'POST' })
   },
 
-  refreshBrowserVersion(id: string): Promise<Profile> {
-    return request<Profile>(`${API_PREFIX}/profiles/${id}/refresh-browser`, { method: 'POST' })
+  /** The whole Phasmid profile JSON the machine is stored as; 404 until one is generated. */
+  getMachine(id: string): Promise<Record<string, unknown>> {
+    return request<Record<string, unknown>>(`${API_PREFIX}/profiles/${id}/machine`)
   },
 
   /** keepMachine: move the OS setting to the pin. Otherwise: pin new hardware for the setting. */
@@ -388,8 +396,8 @@ export interface ActiveBrowser {
   /** Viewable in the browser viewer (the server runs it on its own VNC display). */
   vnc?: boolean
   mode?: DisplayMode
-  /** Drivable from Playwright over playwrightUrl(). */
-  playwright?: boolean
+  /** Drivable over CDP at cdpUrl(). */
+  cdp?: boolean
 }
 
 function profileSocketUrl(profileId: string, channel: string): string {
@@ -404,9 +412,13 @@ export function vncUrl(profileId: string): string {
   return profileSocketUrl(profileId, 'vnc')
 }
 
-/** The WebSocket a Playwright client connects to: firefox.connect(url). */
-export function playwrightUrl(profileId: string): string {
-  return profileSocketUrl(profileId, 'playwright')
+/**
+ * The CDP WebSocket an automation client connects to:
+ * chromium.connect_over_cdp(url) in Playwright, or
+ * puppeteer.connect({ browserWSEndpoint: url }).
+ */
+export function cdpUrl(profileId: string): string {
+  return profileSocketUrl(profileId, 'cdp')
 }
 
 export const browsersAPI = {
@@ -445,8 +457,9 @@ export const groupsAPI = {
 
 /** What a schedule does when it fires. Hardware regeneration is deliberately
  * not schedulable: it would hand a warmed-up account new hardware on a timer,
- * which is exactly what the pinned machine exists to prevent. */
-export type ScheduleAction = 'launch' | 'refresh_browser'
+ * which is exactly what the pinned machine exists to prevent. Nor is a browser
+ * update: Phasmid reports the version installed, for every profile at once. */
+export type ScheduleAction = 'launch'
 
 export type ScheduleKind = 'interval' | 'daily'
 
@@ -526,7 +539,8 @@ export interface SystemConfig {
   user_auth_enabled: boolean
   encryption_enabled: boolean
   cors_origins: string[]
-  camoufox_available: boolean
+  browser_available: boolean
+  browser_version: string | null
   uptime_seconds: number
 }
 
@@ -588,23 +602,24 @@ export const recoveryAPI = {
   },
 }
 
-/** A fingerprint captured from a real machine, bundled with Camoufox. */
-export interface DevicePreset {
-  id: string
+/** A GPU a generated machine may claim, because a captured host backs it. */
+export interface GpuChoice {
   os: string
-  screen?: string | null
-  hardware_concurrency?: number | null
-  gpu?: string | null
-  vendor?: string | null
-  user_agent?: string | null
+  /** "<vendor_id>:<device_id>", the browser_settings.gpu value. */
+  gpu: string
+  /** The WebGL unmasked renderer pages will see. */
+  renderer: string
+  /** How often it is drawn when no GPU is chosen. */
+  weight: number
 }
 
-export const presetsAPI = {
-  async list(os?: string): Promise<DevicePreset[]> {
-    const body = await request<{ data: { presets: DevicePreset[] } }>(
-      `${API_PREFIX}/fingerprints/presets${toQuery({ os })}`,
+export const fingerprintsAPI = {
+  /** Empty until the browser is installed. */
+  async gpus(os?: string): Promise<GpuChoice[]> {
+    const body = await request<{ data: { gpus: GpuChoice[]; total: number } }>(
+      `${API_PREFIX}/fingerprints/gpus${toQuery({ os })}`,
     )
-    return body.data.presets
+    return body.data.gpus
   },
 }
 
@@ -665,8 +680,7 @@ export const systemAPI = {
 
 /** Whether a profile states where it is instead of letting its proxy say. */
 export function hasGeography(profile: Profile): boolean {
-  const bs = profile.browser_settings ?? {}
-  return Boolean(bs.timezone || bs.geolocation)
+  return Boolean(profile.browser_settings?.timezone)
 }
 
 export function formatProxyString(proxy?: ProxyConfig | null): string {
@@ -679,7 +693,7 @@ export function formatProxyString(proxy?: ProxyConfig | null): string {
  *
  * Derived rather than stored, so a row written by an older version cannot
  * disagree with the rules here. An error-level finding is red even when the
- * proxy answered — SOCKS credentials that Camoufox will drop means the launch
+ * proxy answered — SOCKS4 credentials the browser cannot send mean the launch
  * is wrong, which is not a milder problem than an unreachable proxy.
  */
 export function readProxyCheck(check: ProxyCheckRecord): {
@@ -728,7 +742,31 @@ export function formatLastUsed(value?: string | null): string {
 }
 
 export const OS_LABELS: Record<string, string> = {
-  windows: 'Windows',
-  macos: 'macOS',
   linux: 'Linux',
+  windows: 'Windows',
+}
+
+/**
+ * Reduce a WebGL renderer string to the card name.
+ *
+ *   "ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 (0x00002504) Direct3D11 vs_5_0 ps_5_0, D3D11)"
+ *     -> "NVIDIA GeForce RTX 3060"
+ *   "ANGLE (NVIDIA Corporation, NVIDIA GeForce RTX 3060/PCIe/SSE2, OpenGL 4.5.0)"
+ *     -> "NVIDIA GeForce RTX 3060"
+ *
+ * Unwrapping ANGLE first matters: vendor names contain their own brackets
+ * ("Intel(R) UHD Graphics"), so cutting at the first one truncates the name.
+ * Anything that does not look like ANGLE comes back as it was.
+ */
+export function shortGpu(gpu?: string | null): string {
+  if (!gpu) return ''
+  const angle = gpu.match(/^ANGLE \((.*)\)$/)
+  if (!angle) return gpu.trim()
+  // vendor, device[, backend]: the device is the second part.
+  const parts = angle[1].split(/,\s*/)
+  const device = parts.length >= 2 ? parts[1] : parts[0]
+  const name = device
+    .split(/\s+Direct3D|\s+vs_|\/PCIe|\/SSE2|\s+\(0x[0-9a-f]+\)/i)[0]
+    .trim()
+  return name || gpu.trim()
 }

@@ -32,7 +32,6 @@ const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
 const ACTION_LABELS: Record<ScheduleAction, string> = {
   launch: 'Open browser',
-  refresh_browser: 'Refresh browser version',
 }
 
 const OUTCOME_STYLES: Record<ScheduleRunOutcome, string> = {
@@ -245,7 +244,7 @@ export default function SchedulesPage() {
         <EmptyState
           icon={<CalendarClock size={18} />}
           title="Nothing scheduled"
-          body="Open a profile's browser on a schedule, or keep its pinned browser version current. Runs missed while the app is closed are skipped, not replayed."
+          body="Open a profile's browser on a schedule to keep it warm. Runs missed while the app is closed are skipped, not replayed."
           action={
             <button className="btn btn-primary" onClick={openCreate}>
               <Plus size={14} strokeWidth={2.5} />
@@ -402,14 +401,11 @@ export default function SchedulesPage() {
               onChange={(event) => setAction(event.target.value as ScheduleAction)}
             >
               <option value="launch">Open browser — warm the profile with a session</option>
-              <option value="refresh_browser">
-                Refresh browser version — keep the pinned machine&apos;s browser current
-              </option>
             </select>
             <p className="mt-1 text-ink-faint">
-              {action === 'refresh_browser'
-                ? 'Moves only the browser version onto the installed one; the screen, GPU, cores and seeds stay. Regenerating the hardware itself is deliberately not schedulable — it would make the profile a new machine on a timer.'
-                : 'Launches through the same session manager as the Open button; if the browser is already running, the run is skipped.'}
+              Launches through the same session manager as the Open button; if the browser is
+              already running, the run is skipped. Regenerating the hardware is deliberately not
+              schedulable — it would make the profile a new machine on a timer.
             </p>
           </div>
 

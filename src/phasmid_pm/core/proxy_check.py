@@ -72,6 +72,12 @@ def valid_ipv6(value: str) -> bool:
         return False
 
 
+SOCKS4_UNSUPPORTED = (
+    "SOCKS4 proxies cannot be used: the exit address a launch places the machine at "
+    "cannot be looked up through one. Use SOCKS5, HTTP or HTTPS."
+)
+
+
 class LocationUnavailable(RuntimeError):
     """The exit address could not be placed on the map."""
 
@@ -146,15 +152,8 @@ def proxy_url(proxy: ProxyConfig) -> str:
 def preflight(proxy: ProxyConfig) -> list[Finding]:
     """What can be said about a proxy without touching the network."""
     findings: list[Finding] = []
-    if proxy.type == ProxyType.SOCKS4 and (proxy.username or proxy.password):
-        findings.append(
-            Finding(
-                "error",
-                "proxy",
-                "SOCKS4 has no password authentication, so this profile will fail to "
-                "launch. Use SOCKS5, HTTP or HTTPS for credentials.",
-            )
-        )
+    if proxy.type == ProxyType.SOCKS4:
+        findings.append(Finding("error", "proxy", SOCKS4_UNSUPPORTED))
     return findings
 
 
@@ -304,6 +303,8 @@ async def resolve_exit_ip(
     rate-limit page can answer 200 with HTML, and that string must never reach a
     profile.
     """
+    if proxy is not None and proxy.type == ProxyType.SOCKS4:
+        raise ConnectionError(SOCKS4_UNSUPPORTED)
     url = proxy_url(proxy) if proxy else None
     last_error: Exception | None = None
 

@@ -157,6 +157,17 @@ def needs_move(pin: dict[str, Any], settings: BrowserSettings, exit_ip: str | No
     return False
 
 
+def forget_placement(pin: dict[str, Any]) -> dict[str, Any]:
+    """The pin without its exit address, so the next launch places it again.
+
+    For when the stated timezone or languages change: the stored location was
+    derived from them, and an unchanged exit would otherwise keep it.
+    """
+    moved = copy.deepcopy(pin)
+    ((moved.get("network") or {}).get("webrtc") or {}).pop("public_ip", None)
+    return moved
+
+
 def merge_location(pin: dict[str, Any], fresh: dict[str, Any]) -> dict[str, Any]:
     """The pin with ``fresh``'s location group, and nothing else of it."""
     moved = copy.deepcopy(pin)

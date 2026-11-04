@@ -350,15 +350,39 @@ async def test_a_proxy_goes_through_proxyroute_with_its_credentials_in_a_private
 
 
 @pytest.mark.asyncio
-async def test_socks4_goes_to_chrome_directly(profile_manager):
+async def test_socks4_is_refused_before_anything_starts(profile_manager, phasmid):
+    """httpx cannot look up an exit through SOCKS4, so the machine cannot be placed."""
     profile = await profile_manager.create_profile(
         name="p", proxy_config={"type": "socks4", "server": "proxy.example:1080"}
     )
 
+    with pytest.raises(BrowserLaunchError, match="SOCKS4"):
+        await profile_manager.launch_browser(profile.id, mode="headless")
+
+    assert phasmid.exit_lookups == []
+    assert await profile_manager.storage.get_lease(profile.id) == (None, None)
+
+
+@pytest.mark.asyncio
+async def test_clearing_a_stated_timezone_moves_the_machine_back_at_the_same_exit(
+    profile_manager, phasmid
+):
+    profile = await profile_manager.create_profile(
+        name="p", browser_settings={"timezone": "Asia/Tokyo", "languages": ["ja", "en"]}
+    )
+    phasmid.exit_ip = "203.0.113.10"
+    await profile_manager.launch_browser(profile.id, mode="headless")
+    await profile_manager.close_browser(profile.id)
+
+    stored = await profile_manager.get_profile(profile.id)
+    settings = stored.browser_settings.model_dump() | {"timezone": None, "languages": None}
+    await profile_manager.update_profile(profile.id, {"browser_settings": settings})
     await profile_manager.launch_browser(profile.id, mode="headless")
 
-    argv = launched(profile_manager, profile.id)["argv"]
-    assert "--proxy-server=socks4://proxy.example:1080" in argv
+    pin = (await profile_manager.get_profile(profile.id)).fingerprint
+    assert pin["locale"]["timezone"] == "Europe/Berlin", "the exit decides again"
+    assert pin["locale"]["languages"][0] == "de-DE"
+    assert pin["network"]["webrtc"]["public_ip"] == "203.0.113.10"
 
 
 @pytest.mark.asyncio

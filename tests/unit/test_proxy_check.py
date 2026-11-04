@@ -119,18 +119,22 @@ def test_an_unknown_timezone_name_is_refused_by_the_settings():
         BrowserSettings(timezone="Mars/Olympus")
 
 
-def test_socks4_with_credentials_is_reported_before_any_request():
-    """SOCKS4 has no password authentication, so the launch would fail.
+def test_socks4_is_reported_before_any_request():
+    """A launch cannot look up its exit through SOCKS4, so it would be refused.
 
     Better to say so on the check button than to let the user find out when the
     browser will not start.
     """
-    findings = preflight(
-        ProxyConfig(type=ProxyType.SOCKS4, server="h:1080", username="u", password="p")
-    )
+    findings = preflight(ProxyConfig(type=ProxyType.SOCKS4, server="h:1080"))
 
     assert [f.level for f in findings] == ["error"]
-    assert "fail to launch" in findings[0].message
+    assert "SOCKS4" in findings[0].message
+
+
+@pytest.mark.asyncio
+async def test_socks4_fails_the_lookup_in_words_instead_of_raising():
+    with pytest.raises(ConnectionError, match="SOCKS4"):
+        await proxy_check.resolve_exit_ip(ProxyConfig(type=ProxyType.SOCKS4, server="h:1080"))
 
 
 def test_socks5_with_credentials_is_fine():

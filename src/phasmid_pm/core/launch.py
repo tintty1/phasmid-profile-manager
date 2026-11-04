@@ -52,13 +52,11 @@ def _write_private(path: Path, text: str) -> None:
 def proxy_switches(proxy: ProxyConfig) -> tuple[list[str], list[str]]:
     """(proxyroute arguments, Chrome switches) for a proxy.
 
-    SOCKS4 has no credentials to relay and proxyroute does not speak it, so it
-    goes to Chrome directly; everything else goes through proxyroute.
+    Every supported proxy goes through proxyroute; SOCKS4 is refused before a
+    launch gets here (proxy_check.SOCKS4_UNSUPPORTED).
     """
     if proxy.type == ProxyType.SOCKS4:
-        if proxy.username or proxy.password:
-            raise BrowserLaunchError("SOCKS4 proxies cannot authenticate; use SOCKS5 or HTTP.")
-        return [], [f"--proxy-server=socks4://{proxy.server}"]
+        raise BrowserLaunchError("SOCKS4 proxies are not supported; use SOCKS5, HTTP or HTTPS.")
     return [f"--proxy-default={proxy_url(proxy)}"], []
 
 

@@ -21,6 +21,7 @@ from .models import (
     ProfileGroup,
     ProfileStatus,
     ProxyConfig,
+    ProxyType,
     UsageStats,
     generate_profile_id,
 )
@@ -201,6 +202,7 @@ class ProfileManager:
             raise StaleWriteError(profile_id, expected_row_version)
 
         proxy_before = profile.proxy
+        settings_before = profile.browser_settings.model_copy()
 
         # Update profile fields
         for key, value in updates.items():
@@ -230,6 +232,15 @@ class ProfileManager:
         if "proxy_config" in updates or "proxy" in updates:
             if profile.proxy != proxy_before:
                 profile.proxy_check = None
+
+        # A stated timezone or language list, set or cleared, changes where the
+        # machine should be; forgetting its placement makes the next launch
+        # place it again, even at the same exit.
+        if profile.fingerprint and (
+            profile.browser_settings.timezone != settings_before.timezone
+            or profile.browser_settings.languages != settings_before.languages
+        ):
+            profile.fingerprint = machine.forget_placement(profile.fingerprint)
 
         # Changing the OS of a pinned profile is not refused: the setting is not
         # what a page sees while a pin exists, so nothing breaks, and refusing
@@ -682,6 +693,8 @@ class ProfileManager:
             if not profile.browser_settings.clear_geography():
                 unchanged.append(profile_id)
                 continue
+            if profile.fingerprint:
+                profile.fingerprint = machine.forget_placement(profile.fingerprint)
             profile.updated_at = datetime.now()
             # Version-checked for the same reason an edit is: this reads the
             # row, changes it and writes it back, so a save that lands in
@@ -828,6 +841,9 @@ class ProfileManager:
             data_path.mkdir(parents=True, exist_ok=True)
             profile.storage_path = str(data_path)
             settings = profile.browser_settings
+
+            if profile.proxy is not None and profile.proxy.type == ProxyType.SOCKS4:
+                raise BrowserLaunchError(proxy_check.SOCKS4_UNSUPPORTED)
 
             # Where the browser will come out. Asked through the proxy itself,
             # so the location group is placed at the address pages will see.

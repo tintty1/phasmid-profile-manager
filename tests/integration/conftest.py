@@ -1,0 +1,38 @@
+"""Fixtures for API integration tests."""
+
+import httpx
+import pytest
+from httpx import ASGITransport
+
+from camoufox_pm.api import dependencies
+from camoufox_pm.core.database import StorageManager
+from camoufox_pm.core.profile_manager import ProfileManager
+from camoufox_pm.core.scheduler import TaskScheduler
+from camoufox_pm.main import app
+
+
+@pytest.fixture
+async def client(tmp_path, monkeypatch):
+    """An HTTP client wired to the app with a throwaway database."""
+    storage = StorageManager(str(tmp_path / "api.db"))
+    await storage.initialize()
+    manager = ProfileManager(storage, str(tmp_path))
+    await manager.initialize()
+
+    dependencies.set_storage_manager(storage)
+    dependencies.set_profile_manager(manager)
+    monkeypatch.setattr("camoufox_pm.core.browser_install.ensure_browser_ready", lambda: None)
+    from camoufox_pm.api.routes.recovery import set_backup_manager
+    from camoufox_pm.core.backups import ProfileBackupManager
+
+    set_backup_manager(ProfileBackupManager(manager))
+    # Not started: the routes only need it to plan and to run-now; the loop
+    # would poll on a real clock, which tests must not depend on.
+    dependencies.set_scheduler(TaskScheduler(storage, manager))
+
+    transport = ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as http_client:
+        yield http_client
+
+    await storage.close()
+    set_backup_manager(None)

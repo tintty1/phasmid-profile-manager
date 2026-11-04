@@ -1,0 +1,600 @@
+# REST API reference
+
+The API is the same one the web UI uses. A running instance serves interactive
+documentation at **`/docs`** (Swagger) and **`/redoc`**, generated from the code —
+that is the authoritative schema. This page is the guided tour, and the
+[stability contract](#stability-contract) below is what we promise to keep.
+
+Base URL: `http://127.0.0.1:8000` by default. Endpoints live under **`/api/v1`**.
+
+The unversioned `/api/...` paths that predate 0.2.0 keep working as aliases — same
+routes, same behaviour — but are left out of the OpenAPI schema so a generated
+client sees each operation once. New code should use `/api/v1`.
+
+## Authentication
+
+Two independent mechanisms, either of which satisfies the guard on every
+`/api/...` route. Which ones are active follows from what is configured — there
+is no separate auth switch:
+
+1. **Nothing configured** (no users, no `CPM_API_KEY`): the API is open. This is
+   the default, and it is fine because the app binds to loopback.
+2. **`CPM_API_KEY` set**: every request must carry the key — the
+   machine-to-machine path, unchanged from before user accounts existed:
+
+   ```bash
+   curl -H "X-API-Key: $CPM_API_KEY" http://localhost:8000/api/v1/profiles
+   ```
+
+   The key is compared in constant time. The web UI can send it too — paste it
+   into the Settings screen, which stores it in that browser only.
+3. **Any user account exists** (`camoufox-pm user add <name>`): the API requires
+   a login session — or the API key, so machine clients keep working the day a
+   human account is created. The web UI shows a login screen; other clients call
+   `POST /api/v1/auth/login` and carry the `cpm_session` cookie it sets. There
+   is no registration endpoint: accounts are created from the CLI, which
+   requires shell access to the host.
+
+**Configure at least one of them before binding to anything other than
+`127.0.0.1`.** Without either, anybody who can reach the port can read your
+profiles, including proxy passwords.
+
+### Login sessions
+
+```http
+POST /api/v1/auth/login       {"username": "...", "password": "..."}
+POST /api/v1/auth/logout
+GET  /api/v1/auth/session
+```
+
+These three are the only unauthenticated API routes — login has to work logged
+out, and `GET /auth/session` is how the UI decides whether to show the login
+screen. Login and `GET /auth/session` answer
+`{user_auth_enabled, authenticated, username}`; login additionally sets the
+session cookie. Logout returns the action envelope and clears the cookie.
+
+- A successful login sets `cpm_session`: **HttpOnly** (invisible to page
+  scripts), **SameSite=Lax**, `Path=/`, and **Secure** when the request came
+  over HTTPS or `CPM_SECURE_COOKIES=1`. It expires after `CPM_SESSION_TTL_HOURS`
+  (default 168, one week).
+- The session is server-side: the database stores only a SHA-256 of the token,
+  and logout deletes the row, so a logged-out token is dead even if replayed.
+- A failed login is a `401` with the same body whether the username exists or
+  the password is wrong, costs an argon2 verification either way, and is
+  delayed half a second.
+- Passwords are hashed with argon2id; no response or log ever carries a
+  password or a hash.
+
+## Conventions
+
+- Request and response bodies are JSON, except file upload and download.
+- Resource endpoints return the resource itself. Action and system endpoints
+  that have no resource to return use the envelope
+  `{"success": bool, "message": str, "data": ...}`.
+- **A field you send is authoritative, including `null`, which clears it. A field
+  you omit is left alone.** This matters most on `PUT /api/v1/profiles/{id}`:
+  send `{"proxy_config": null}` to detach a proxy; omit the key to leave it.
+- Statuses: `400` for a bad request, `401` for missing or wrong credentials
+  (API key or login session), `404` for a missing resource, `405` for a method
+  the path does not accept, `409` for a state conflict, `422` for values that
+  fail validation, `500` otherwise. `409` covers several conflicts, so it always
+  carries a code that says which: `stale_write` when someone else saved the
+  profile first, `conflict` for a profile that is running or leased elsewhere,
+  `protected` for a protected profile asked to be deleted or given new hardware.
+
+### Errors
+
+Every non-2xx response from an `/api` route has one shape (`/health` is the
+exception — see [System](#system)):
+
+```json
+{
+  "error": {
+    "code": "not_found",
+    "message": "Profile with ID x1 not found",
+    "details": null
+  },
+  "detail": "Profile with ID x1 not found"
+}
+```
+
+- `error.code` is a stable snake_case token: `bad_request`, `unauthorized`,
+  `not_found`, `method_not_allowed`, `conflict`, `validation_error`,
+  `internal_error`.
+- `error.message` is always a single human-readable string — including for
+  validation failures, which used to arrive as a list.
+- `error.details` carries the structured specifics when there are any; for
+  validation failures it is pydantic's error list, each entry with `loc`,
+  `msg` and `type`.
+- `detail` mirrors `error.message` for clients written against FastAPI's
+  default shape. It is deprecated and goes away in 1.0; read `error.message`.
+
+## Stability contract
+
+`1.0` freezes, for the whole `1.x` line:
+
+- the `/api/v1` paths, methods and status codes documented here;
+- the names and types of every documented request and response field —
+  fields are only ever *added*, never renamed or removed;
+- the error shape above and its `error.code` values;
+- the pagination shape on `GET /api/v1/profiles`.
+
+New endpoints, new optional parameters and new response fields are **not**
+breaking changes and can appear in any release. Anything that would break the
+above waits for a `/api/v2`, at which point `/api/v1` keeps working.
+
+Deliberately **outside** the contract, at 1.0 and after:
+
+- the contents of the `fingerprint` summary on a profile — its values come from
+  Camoufox's fingerprint catalogue and change when Camoufox does;
+- `camoufox_options` in the launch response — launch internals, exposed for
+  debugging;
+- the entries of `actions` in profile statistics;
+- the preset fields beyond `id` and `os` — they describe whatever Camoufox's
+  captured devices carry.
+
+### Deprecated, removed in 1.0
+
+Everything here works throughout `0.2.x` and is marked deprecated in the
+OpenAPI schema:
+
+| Deprecated                                        | Use instead                          |
+| ------------------------------------------------- | ------------------------------------ |
+| Flattened `browser_*` fields on profile update    | the same keys in `browser_settings`  |
+| `browser_session_id` in the launch response       | `profile_id` (it addresses the browser); the id was a random value nothing accepted |
+| Top-level `detail` in error responses             | `error.message`                      |
+
+The unversioned `/api/...` aliases outlive 1.0 — scripts against them keep
+working for the whole `1.x` line — and are removed in 2.0.
+
+## Profiles
+
+### List
+
+```http
+GET /api/v1/profiles?page=1&per_page=25&status=active&group=<id>&search=shop
+```
+
+Returns `{profiles, total, page, per_page, has_next, has_prev}`. `search` matches
+the name. This is the only paginated collection: groups and browsers stay small,
+so those lists are returned whole.
+
+### Create
+
+```http
+POST /api/v1/profiles
+```
+
+```json
+{
+  "name": "shop-de-01",
+  "group": "<group id>",
+  "notes": "free text",
+  "generate_fingerprint": true,
+  "fingerprint_preset": "windows:42",
+  "browser_settings": {
+    "os": "windows",
+    "timezone": "Europe/Berlin",
+    "languages": ["de-DE", "de"],
+    "hardware_concurrency": 8,
+    "window_width": 1280,
+    "window_height": 720,
+    "webrtc_mode": "replace",
+    "geolocation": {"lat": 52.52, "lon": 13.405}
+  },
+  "proxy_config": {
+    "type": "socks5", "server": "host:1080",
+    "username": "u", "password": "p"
+  }
+}
+```
+
+Only `name` is required. Everything under `browser_settings` that you leave out is
+generated as a consistent fingerprint.
+
+`fingerprint_preset` pins the profile to a real device from
+`GET /api/v1/fingerprints/presets`; the preset then defines the hardware, so
+values it owns are not also generated. This needs the browser installed and
+returns `400` if it is not, rather than creating a profile with a different
+machine than the one asked for.
+
+Responds `201` with the profile, including a `fingerprint` summary once one is
+pinned.
+
+### Read, update, delete
+
+```http
+GET    /api/v1/profiles/{id}
+PUT    /api/v1/profiles/{id}
+DELETE /api/v1/profiles/{id}
+```
+
+`DELETE` now moves the profile to Trash, retains its browser directory and pauses
+its schedules. It is hidden from normal list/get/launch calls. A running or leased
+profile returns `409`. Use the explicit Trash endpoint below to erase it.
+
+#### Protected profiles
+
+Create or update a profile with `"protected": true` to guard an account that
+matters against mistakes — a misdirected script or an agent. While it is set,
+moving the profile to Trash, purging it, `reset-fingerprint` and `reconcile-os`
+with `keep_machine: false` are refused with **`409`** and the code `protected`.
+Editing, launching and cloning are unaffected, and a clone starts unprotected.
+Send `{"protected": false}` to lift it; that explicit step is the point.
+
+`PUT` takes the same shape as create. `browser_settings` is **merged** over what
+is stored, so sending one field does not reset the rest of the fingerprint. The
+older flattened form (`browser_os`, `browser_timezone`, …) still works and is
+merged the same way, but is deprecated — it goes away in 1.0.
+
+#### Not overwriting someone else's save
+
+Every profile carries a `row_version`, bumped by each save. Send back the one you
+read and a save that landed in between is refused with **`409`** and the code
+`stale_write`, instead of silently reverting it:
+
+```http
+PUT /api/v1/profiles/{id}    {"notes": "...", "row_version": 7}
+```
+
+```json
+{"error": {"code": "stale_write",
+           "message": "Profile … was changed by someone else since it was read; reload it and apply the edit again"}}
+```
+
+Reload the profile, decide what to do with the difference, and retry against the
+`row_version` that comes back. The refusal writes nothing, so nothing is
+half-applied.
+
+Omitting `row_version` keeps the previous behaviour and stays supported: the
+server then guards only against two requests overlapping, which cannot know about
+an edit made against a form loaded minutes ago. Sending it is what protects a
+long-lived form.
+
+Not every write bumps the version. A proxy check and a browser launch write only
+the columns they own — `proxy_check`, and the pinned machine with `last_used` —
+precisely so that a thirty-second proxy check or a launch does not make every open
+edit form fail to save. The consequence is that those writes cannot be guarded
+this way either; nothing else in the API writes a profile without a version.
+
+### Other actions
+
+```http
+POST /api/v1/profiles/{id}/clone              {"new_name": "...", "regenerate_fingerprint": true}
+POST /api/v1/profiles/{id}/reset-fingerprint
+GET  /api/v1/profiles/{id}/stats
+```
+
+A clone gets **its own machine**, not a copy of the source's. `regenerate_fingerprint`
+defaults to true, which drops the pinned fingerprint so the copy's first launch
+resolves a new one — two profiles sharing a pin would report the same GPU, screen,
+core count and noise seeds forever, which is provably one computer. Pass
+`{"regenerate_fingerprint": false}` to copy the machine as well, and know what you
+are asking for.
+
+`reset-fingerprint` generates new settings **and drops the pinned machine**, so
+the next launch assigns fresh hardware.
+
+```http
+POST /api/v1/profiles/{id}/refresh-browser
+```
+
+Moves the pinned machine onto the installed browser version, changing only the
+browser: the hardware and the noise seeds are kept. Use it when a profile's pin
+has fallen behind the browser on disk — `fingerprint.browser_outdated` in the
+profile response says when. Returns `400` if the profile has no pin yet.
+
+The response's `fingerprint` summary carries `browser_major`, `installed_major`
+and `browser_outdated` so a client does not have to parse the user agent.
+
+```http
+POST /api/v1/profiles/{id}/reconcile-os     {"keep_machine": true}
+```
+
+Brings a profile's `os` setting and its pinned machine back into agreement. The
+summary reports the disagreement as `pinned_os`, `settings_os` and `os_mismatch`.
+
+- `keep_machine: true` sets `os` to what the pin reports and changes **no**
+  fingerprint value.
+- `keep_machine: false` pins a machine resolved for the `os` setting instead —
+  new screen, GPU, cores, fonts and noise seeds, and `browser_settings.screen` is
+  updated to match.
+
+`400` when the profile has no pin, when the pin's OS cannot be read, or when the
+two already agree — regenerating hardware is irreversible for an account, so a
+stale client cannot trigger it by accident.
+
+```http
+POST /api/v1/profiles/clear-geography    {"profile_ids": ["a1b2c3d4", ...]}
+```
+
+Unsets `timezone` and `geolocation` on each profile named, so Camoufox derives
+both — and the WebRTC address — from where that profile's proxy comes out, as a
+profile created today does. Languages and `locale` are not touched. Returns
+`cleared`, `unchanged` (already followed the proxy) and `not_found`, so a bulk
+call reports itself; `422` for an empty list.
+
+## Checking a proxy
+
+```http
+POST /api/v1/profiles/{id}/check-proxy
+POST /api/v1/proxy/check      {"proxy_config": {...}, "browser_settings": {...}}
+```
+
+Both reach the internet through the proxy and return the same shape: `reachable`,
+`error`, `latency_ms`, the `location` it comes out at (`ip`, `country`,
+`timezone`, `latitude`, `longitude`) and a list of `findings`, each with a
+`level` of `error`, `warning` or `info`, the `field` it concerns and a message.
+
+A proxy that does not answer is reported with `reachable: false` and an `error`,
+not raised as a 5xx. The second form takes an unsaved proxy, which is what the
+profile form uses so a proxy can be checked before the profile exists; omit
+`proxy_config` to check the direct connection.
+
+Checking a **saved** profile also keeps the answer on it, so the profiles list can
+show a proxy's last state without asking again. It comes back as `proxy_check` on
+the profile — `checked_at`, `reachable`, `error`, `latency_ms`, `ip`, `country`,
+`timezone` and the same `findings` — and as `checked_at` on the check response
+itself. It is `null` until the profile is checked, and again whenever its proxy
+changes, because an answer from the previous proxy says nothing about the new one.
+Nothing writes it but a check that was asked for; there is no polling.
+
+## Running browsers
+
+```http
+POST /api/v1/profiles/{id}/launch    {"mode": "virtual", "window_size": "1280x720"}
+POST /api/v1/profiles/{id}/close
+GET  /api/v1/browsers/active
+GET  /api/v1/browsers/modes
+POST /api/v1/browsers/close-all
+WS   /api/v1/profiles/{id}/playwright
+```
+
+Launch responds with `status` (`launched`, or `already_running` if the profile's
+browser is already up), a `message`, the `process_id`, the `mode` and a
+`playwright_endpoint`. Closing a browser that is not running is a no-op reported
+as `status: "not_running"`, not an error.
+
+`mode` is where the browser draws, chosen per launch:
+
+| `mode`     | Draws on                                                      |
+| ---------- | ------------------------------------------------------------- |
+| `headless` | nothing                                                       |
+| `virtual`  | its own VNC display, viewable in the web UI (needs Xvnc)      |
+| `window`   | this machine's desktop; in Docker, `docker-compose.desktop.yml` |
+
+Left out, `headless` decides, and a headed launch uses `virtual` when `CPM_VNC`
+is on (the Docker image) and `window` otherwise. `GET /api/v1/browsers/modes`
+says which modes this instance can launch in (with the reason for any it cannot)
+and which one is the default; the web UI's Run menu is built from it.
+
+### Driving a browser with Playwright
+
+Every running browser, in every mode, can be driven by Playwright from another
+process — an agent, a script, a test. Connect to the `playwright_endpoint` from
+the launch response; Playwright's version must match the server's (1.60):
+
+```python
+browser = await playwright.firefox.connect(
+    endpoint,                         # ws://127.0.0.1:8000/api/v1/profiles/<id>/playwright
+    headers={"x-api-key": API_KEY},   # only when CPM_API_KEY is set
+)
+page = browser.contexts[0].pages[0]   # the profile's own context: its cookies and storage
+```
+
+The endpoint goes through the API's port and auth, so it works unchanged from
+Docker. `browser.close()` only disconnects that client: the profile keeps running
+for the next one, and `POST /profiles/{id}/close` is what stops it. Launching an
+already-running profile returns the same endpoint, so an agent can always launch
+first and connect second.
+
+The first launch of a profile resolves its fingerprint and stores it; every
+launch after replays it. Closing the browser window yourself is detected and the
+session is cleaned up, so `/api/v1/browsers/active` reflects reality without
+polling the process table.
+
+Launching a profile that another instance has open returns **`409`**. Each
+launch takes a lease on the profile, and `/api/v1/browsers/active` only sees
+this instance's browsers — the lease is what one instance knows about another's.
+Retry once the holder closes the browser, or wait out `CPM_LEASE_TTL` if that
+instance is gone. There is no force-unlock endpoint: releasing another
+instance's lease needs `camoufox-pm unlock` on the host.
+
+## Moving a profile
+
+### Recovery and first-run setup
+
+```http
+GET    /api/v1/trash/profiles
+POST   /api/v1/trash/profiles/{id}/restore
+DELETE /api/v1/trash/profiles/{id}?confirm=true
+GET    /api/v1/system/backups
+POST   /api/v1/system/backups             {"profile_ids": ["id"], "reason": "manual"}
+POST   /api/v1/system/backups/{id}/restore {"name": "Recovered profile"}
+GET    /api/v1/system/browser
+POST   /api/v1/system/browser/install
+GET    /api/v1/system/updates
+POST   /api/v1/system/updates/prepare
+```
+
+These endpoints use the same authentication as the rest of the API and return
+`{success, message, data}`. Trash has no automatic expiry. Restoring it reuses
+the original profile but leaves schedules paused. Permanent deletion requires
+`confirm=true` and only accepts already-trashed, closed profiles.
+
+Backups carry settings, the pinned fingerprint and browser data. Restore creates
+a **new** ID/directory, leaving existing profiles unchanged. Archives contain
+session cookies and decrypted proxy credentials: keep them private. They do not
+include app login users, app settings or schedules. Backup creation returns
+`data.backups` and `data.skipped` (profile ID/reason); live profiles, missing
+directories and unreadable credentials are not reported as successful backups.
+Omit `profile_ids` to back up all profiles, including Trash. The running app
+retries due backups every minute, defaulting to one snapshot per 24 hours and
+seven routine snapshots per profile; `CPM_BACKUP_INTERVAL_HOURS` and
+`CPM_BACKUP_RETENTION` configure this. Two latest before-update checkpoints are
+retained separately.
+
+Browser status is `{installed, version, state, progress, message, error}`, where
+`state` is `idle`, `downloading`, `ready` or `error`, and progress is 0–100 or null.
+GET does not download anything. POST starts an in-process background download
+and repeated POSTs while downloading reuse it. Poll GET to observe completion.
+This delegates versioned installation to Camoufox and verifies a provided asset
+digest. Incomplete first-run resources are reported and can be retried.
+
+Update check queries the project's official GitHub release, returning
+`{current_version, latest_version, available, release_url, assets, error}`.
+Prepare creates before-update backups and returns
+`{release_url, backup_count, message}` only if every profile was backed up.
+It fails with `409` for incomplete backups or no newer release, and `503` when
+the release check failed. It does not replace the running application: close it
+and install the chosen release with the operating system installer.
+
+### Manual profile transfer
+
+```http
+GET  /api/v1/profiles/{id}/export      → application/zip
+POST /api/v1/profiles/import[?name=…]  multipart: file=<archive.zip>
+```
+
+The archive carries the profile, its pinned fingerprint and its browser data
+(cookies, storage, history, saved logins). Import assigns a new id, so an archive
+can be restored next to the profile it came from.
+
+- Exporting a **running** profile returns `409` — its databases would be copied
+  mid-write. A profile leased by another instance is refused the same way, for
+  the same reason.
+- The archive is **not encrypted** and holds live session cookies and the proxy
+  password. Treat it like the account itself.
+
+## Device presets
+
+```http
+GET /api/v1/fingerprints/presets?os=windows
+```
+
+The fingerprints Camoufox captured from real machines. This one is wrapped in
+the action envelope: the catalogue arrives as `data.presets`, each entry
+`{id, os, screen, hardware_concurrency, gpu, vendor, user_agent}`, alongside
+`data.total`. Pass an `id` as `fingerprint_preset` when creating a profile.
+
+The catalogue reads without the browser installed; pinning one does not.
+
+## Schedules
+
+```http
+GET    /api/v1/schedules
+POST   /api/v1/schedules
+GET    /api/v1/schedules/{id}
+PUT    /api/v1/schedules/{id}
+DELETE /api/v1/schedules/{id}
+POST   /api/v1/schedules/{id}/run
+GET    /api/v1/schedules/{id}/runs
+```
+
+A schedule runs one of two actions against a profile: `launch` (open its
+browser; `run_minutes` optionally closes it again that many minutes later) or
+`refresh_browser` (move its pinned fingerprint onto the installed browser
+version, hardware untouched). Regenerating the hardware fingerprint is
+deliberately **not** schedulable — it would make the profile a new machine on a
+timer, which is what the pin exists to prevent; see
+[scheduling.md](scheduling.md).
+
+```json
+{
+  "profile_id": "a1b2c3d4",
+  "action": "launch",
+  "kind": "daily",
+  "at_time": "09:00",
+  "days": [0, 1, 2, 3, 4],
+  "run_minutes": 15
+}
+```
+
+- `kind` is `"interval"` with `interval_minutes`, or `"daily"` with `at_time`
+  (`HH:MM`, 24-hour, read on the **server's** clock) and optional `days`
+  (weekdays the schedule fires, `0` = Monday … `6` = Sunday; omitted = every
+  day). A body whose fields do not match its `kind` fails validation.
+- Creating against an unknown profile returns `400`. Deleting a profile deletes
+  its schedules.
+- The response carries `profile_name`, the planned `next_run_at` and the
+  `last_run`, so a client does not join these itself.
+
+`PUT` updates a schedule; omitted fields are left alone, and changing the
+timing (or re-enabling) recomputes `next_run_at` from now. `enabled: false`
+pauses a schedule without losing it.
+
+`POST .../run` executes the action immediately, records the outcome, and does
+**not** move the planned next run; it works on a paused schedule too. The run
+record is returned:
+
+```json
+{"schedule_id": "x9y8z7w6", "outcome": "ok", "message": "Browser launched", ...}
+```
+
+`GET .../runs` lists the newest runs, newest first; the last 20 are kept per
+schedule. `outcome` is `ok`, `skipped` (the browser was already running),
+`error` (the message says why), or `missed` — the run fell due while the app
+was not running and was skipped, never replayed.
+
+## Groups
+
+```http
+GET    /api/v1/groups
+POST   /api/v1/groups            {"name": "Client A", "description": "..."}
+GET    /api/v1/groups/{id}
+PUT    /api/v1/groups/{id}
+DELETE /api/v1/groups/{id}
+```
+
+Deleting a group keeps its profiles; they become ungrouped.
+
+## Bulk editing
+
+```http
+GET  /api/v1/profiles/export/excel     → .xlsx
+POST /api/v1/profiles/import/excel     multipart: file=<sheet.xlsx>
+```
+
+Import always creates new profiles rather than updating existing ones. The export
+contains proxy passwords in clear text. See [excel.md](excel.md).
+
+## System
+
+```http
+GET  /health                                liveness and database state
+GET  /api/v1/system/status                  counts, load, memory, disk, uptime
+GET  /api/v1/system/info                    name, version, uptime
+GET  /api/v1/system/config                  effective configuration, no secret values
+GET  /api/v1/system/profiles/diagnostic     profiles whose storage looks wrong
+POST /api/v1/system/profiles/cleanup        remove orphaned profile directories
+POST /api/v1/system/restart                 close all browsers, ready for a restart
+```
+
+`/health` is deliberately unversioned, so probes survive API versions. An
+unhealthy instance answers with the same body under a `503`, so a load balancer
+or container healthcheck sees the failure without parsing anything.
+
+`/api/v1/system/config` reports whether encryption, the API key and user login
+are on, the bind address, the database path and whether the browser is
+installed — it never returns the values of secrets. It backs the Settings
+screen.
+
+`/api/v1/system/restart` does **not** restart the process; it closes every
+browser so you can restart it cleanly yourself.
+
+## Example: create a profile and run it
+
+```bash
+API=http://localhost:8000
+
+ID=$(curl -s -X POST $API/api/v1/profiles \
+      -H 'Content-Type: application/json' \
+      -d '{"name":"demo","browser_settings":{"os":"windows"}}' \
+      | python3 -c 'import sys,json; print(json.load(sys.stdin)["id"])')
+
+curl -s -X POST $API/api/v1/profiles/$ID/launch \
+     -H 'Content-Type: application/json' -d '{"headless":false}'
+
+curl -s $API/api/v1/browsers/active
+curl -s -X POST $API/api/v1/profiles/$ID/close
+```

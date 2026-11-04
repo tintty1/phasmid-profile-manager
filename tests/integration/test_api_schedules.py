@@ -117,7 +117,6 @@ async def test_run_now_records_an_outcome_and_history_serves_it(client, monkeypa
     class FakeSession:
         process_id = 4242
         mode = "window"
-        playwright_endpoint = None
 
         async def terminate(self):
             pass
@@ -126,10 +125,7 @@ async def test_run_now_records_an_outcome_and_history_serves_it(client, monkeypa
         manager.browser_sessions.active_sessions[pid] = FakeSession()
         return FakeSession()
 
-    from phasmid_pm.core import profile_manager as pm_module
-
     monkeypatch.setattr(manager.browser_sessions, "launch", fake_launch)
-    monkeypatch.setattr(pm_module.fingerprint_store, "resolve", lambda *_a, **_k: {})
 
     ran = await client.post(f"/api/v1/schedules/{created['id']}/run")
     assert ran.status_code == 200, ran.text

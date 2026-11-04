@@ -1,13 +1,15 @@
 """Tests for per-profile VNC displays and how launches use them (no Xvnc started)."""
 
 import base64
+import json
 
 import pytest
 
 from phasmid_pm.api.routes.viewer import _api_key_from_protocols
 from phasmid_pm.core import browser_session as bs
-from phasmid_pm.core.browser_session import BrowserLaunchError, BrowserSessionManager
+from phasmid_pm.core.browser_session import BrowserLaunchError, BrowserSessionManager, LaunchPlan
 from phasmid_pm.core.vnc import DEFAULT_GEOMETRY, display_geometry
+from tests.fakes import write_fake_chrome
 
 
 class FakeDisplay:
@@ -38,56 +40,42 @@ class FakeDisplays:
         return self.live.get(profile_id)
 
 
-class FakeBrowser:
-    def on(self, *_args):
-        pass
-
-
-class FakeCamoufox:
-    def __init__(self, options, fail=None):
-        self.options = options
-        self.fail = fail
-        self.exits = 0
-
-    async def start(self):
-        if self.fail is not None:
-            raise self.fail
-        return FakeBrowser()
-
-    async def __aexit__(self, *_exc):
-        self.exits += 1
-
-
 @pytest.fixture
-def launches(monkeypatch):
-    """Pretend Camoufox is installed; record the options of every launch."""
-    made: list[FakeCamoufox] = []
-    failure: list[Exception] = []
+def launches(tmp_path, monkeypatch):
+    """Launch plans for the fake browser; ``seen(plan)`` is what it was started with."""
+    chrome = write_fake_chrome(tmp_path)
+    monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
 
-    def factory(**options):
-        made.append(FakeCamoufox(options, failure[0] if failure else None))
-        return made[-1]
+    def plan(name: str = "p1", geometry=(1920, 1080), crash: bool = False) -> LaunchPlan:
+        run_dir = tmp_path / "run" / name
+        run_dir.mkdir(parents=True)
+        udd = tmp_path / "profiles" / name
+        udd.mkdir(parents=True)
+        env = {"FAKE_CHROME": "crash"} if crash else {}
+        return LaunchPlan([str(chrome), f"--user-data-dir={udd}"], udd, run_dir, geometry, env=env)
 
-    monkeypatch.setattr(bs, "CAMOUFOX_AVAILABLE", True)
-    monkeypatch.setattr(bs, "AsyncCamoufox", factory)
-    return made, failure
+    return plan
 
 
-def test_geometry_follows_the_fingerprint_window():
-    config = {
-        "window.outerWidth": 1280,
-        "window.outerHeight": 720,
-        "screen.width": 1920,
-        "screen.height": 1080,
+def seen(plan: LaunchPlan) -> dict:
+    return json.loads((plan.user_data_dir / "argv.json").read_text())
+
+
+def test_geometry_follows_the_profile_window():
+    pin = {
+        "display": {
+            "width": 1920,
+            "height": 1080,
+            "window": {"outer_width": 1280, "outer_height": 720},
+        }
     }
-    assert display_geometry({"config": config}) == (1280, 720)
+    assert display_geometry(pin) == (1280, 720)
 
 
-def test_geometry_falls_back_to_the_screen_then_the_window_then_the_default():
-    options = {"config": {"screen.width": 2560, "screen.height": 1440}, "window": (800, 600)}
-    assert display_geometry(options) == (2560, 1440)
-    assert display_geometry({"window": (1280, 720)}) == (1280, 720)
+def test_geometry_falls_back_to_the_screen_then_the_default():
+    assert display_geometry({"display": {"width": 2560, "height": 1440}}) == (2560, 1440)
     assert display_geometry({}) == DEFAULT_GEOMETRY
+    assert display_geometry(None) == DEFAULT_GEOMETRY
 
 
 def test_api_key_is_read_from_the_subprotocol():
@@ -99,25 +87,23 @@ def test_api_key_is_read_from_the_subprotocol():
 
 @pytest.mark.asyncio
 async def test_headed_launch_draws_to_its_own_display(launches):
-    made, _ = launches
     displays = FakeDisplays()
     manager = BrowserSessionManager(vnc=displays)
-    options = {"config": {"screen.width": 1366, "screen.height": 768}}
+    plan = launches(geometry=(1366, 768))
 
-    await manager.launch("p1", options)
+    await manager.launch("p1", plan)
 
     assert displays.started == [("p1", 1366, 768)]
-    assert made[0].options["env"]["DISPLAY"] == ":100"
-    # The caller's options are echoed back in the API response; they stay untouched.
-    assert "env" not in options
+    assert seen(plan)["display"] == ":100"
     assert manager.list_active()[0]["vnc"] is True
+    await manager.close_all()
 
 
 @pytest.mark.asyncio
 async def test_closing_the_browser_stops_its_display(launches):
     displays = FakeDisplays()
     manager = BrowserSessionManager(vnc=displays)
-    await manager.launch("p1", {})
+    await manager.launch("p1", launches())
 
     await manager.close("p1")
 
@@ -126,13 +112,11 @@ async def test_closing_the_browser_stops_its_display(launches):
 
 @pytest.mark.asyncio
 async def test_failed_launch_does_not_leak_its_display(launches):
-    _, failure = launches
-    failure.append(RuntimeError("no browser"))
     displays = FakeDisplays()
     manager = BrowserSessionManager(vnc=displays)
 
     with pytest.raises(BrowserLaunchError):
-        await manager.launch("p1", {})
+        await manager.launch("p1", launches(crash=True))
 
     assert displays.stopped == ["p1"]
     assert not manager.is_live("p1")
@@ -140,26 +124,30 @@ async def test_failed_launch_does_not_leak_its_display(launches):
 
 @pytest.mark.asyncio
 async def test_headless_launch_needs_no_display(launches):
-    made, _ = launches
     displays = FakeDisplays()
     manager = BrowserSessionManager(vnc=displays)
+    plan = launches()
+    plan.headless = True
 
-    await manager.launch("p1", {"headless": True})
+    await manager.launch("p1", plan)
 
     assert displays.started == []
-    assert "env" not in made[0].options
+    assert "--headless" in seen(plan)["argv"]
     assert manager.list_active()[0]["vnc"] is False
+    await manager.close_all()
 
 
 @pytest.mark.asyncio
-async def test_vnc_is_off_by_default(launches):
-    made, _ = launches
+async def test_vnc_is_off_by_default(launches, monkeypatch):
+    monkeypatch.setenv("DISPLAY", ":0")
     manager = BrowserSessionManager()
+    plan = launches()
 
-    await manager.launch("p1", {})
+    await manager.launch("p1", plan)
 
-    assert "env" not in made[0].options
+    assert seen(plan)["display"] == ":0", "the browser inherits this process's display"
     assert manager.list_active()[0]["vnc"] is False
+    await manager.close_all()
 
 
 # -- Display modes ------------------------------------------------------------
@@ -177,40 +165,44 @@ def test_an_explicit_mode_wins_over_headless_and_the_vnc_default():
 @pytest.mark.asyncio
 async def test_virtual_mode_works_without_vnc_as_the_default(launches):
     """PPM_VNC only picks the default; any instance can be asked for a display."""
-    made, _ = launches
     displays = FakeDisplays()
     displays.enabled = False
     manager = BrowserSessionManager(vnc=displays)
+    plan = launches()
 
-    await manager.launch("p1", {}, mode="virtual")
+    await manager.launch("p1", plan, mode="virtual")
 
-    assert made[0].options["env"]["DISPLAY"] == ":100"
+    assert seen(plan)["display"] == ":100"
     assert manager.list_active()[0]["mode"] == "virtual"
+    await manager.close_all()
 
 
 @pytest.mark.asyncio
 async def test_virtual_mode_hides_the_desktop_compositor(launches, monkeypatch):
-    """Firefox prefers Wayland whenever it can reach one, which would put the
+    """Chrome prefers Wayland whenever it can reach one, which would put the
     window on the desktop and leave the VNC display black."""
-    monkeypatch.setenv("WAYLAND_DISPLAY", "wayland-1")
-    made, _ = launches
     manager = BrowserSessionManager(vnc=FakeDisplays())
+    plan = launches()
+    monkeypatch.setenv("WAYLAND_DISPLAY", "wayland-1")
 
-    await manager.launch("p1", {}, mode="virtual")
+    await manager.launch("p1", plan, mode="virtual")
 
-    assert "WAYLAND_DISPLAY" not in made[0].options["env"]
+    assert seen(plan)["wayland"] is None
+    assert "--ozone-platform=x11" in seen(plan)["argv"]
+    await manager.close_all()
 
 
 @pytest.mark.asyncio
 async def test_headless_mode_overrides_a_headed_request(launches):
-    made, _ = launches
     displays = FakeDisplays()
     manager = BrowserSessionManager(vnc=displays)
+    plan = launches()
 
-    await manager.launch("p1", {"headless": False}, mode="headless")
+    await manager.launch("p1", plan, mode="headless")
 
-    assert made[0].options["headless"] is True
+    assert "--headless" in seen(plan)["argv"]
     assert displays.started == []
+    await manager.close_all()
 
 
 def test_window_mode_prefers_a_reachable_wayland_socket(tmp_path):
@@ -262,13 +254,3 @@ def test_a_desktop_and_xvnc_make_every_mode_available(monkeypatch):
 
     assert modes["default"] == "window"
     assert all(m["available"] for m in modes["modes"])
-
-
-def test_macos_and_windows_always_have_a_window_but_no_virtual_display(monkeypatch):
-    monkeypatch.setattr(bs.sys, "platform", "darwin")
-    monkeypatch.delenv("DISPLAY", raising=False)
-
-    by_mode = {m["mode"]: m for m in bs.available_modes(vnc_default=False)["modes"]}
-
-    assert by_mode["window"]["available"] is True
-    assert by_mode["virtual"]["available"] is False

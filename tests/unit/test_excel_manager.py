@@ -69,13 +69,13 @@ async def test_a_row_without_a_name_fails_alone(profile_manager):
 
 
 @pytest.mark.asyncio
-async def test_a_row_with_an_unreadable_number_fails_alone(profile_manager):
+async def test_a_row_with_an_unreadable_value_fails_alone(profile_manager):
     excel_manager = ExcelManager(profile_manager)
     data = build_sheet(
         excel_manager,
         [
-            {"name": "good", "hardware_concurrency": "8"},
-            {"name": "bad", "hardware_concurrency": "lots"},
+            {"name": "good", "gpu": "0x10de:0x2504"},
+            {"name": "bad", "gpu": "RTX 3060"},
         ],
     )
 
@@ -125,15 +125,11 @@ async def test_a_profile_keeps_its_settings_through_an_export_and_import(profile
         name="detailed",
         status="inactive",
         browser_settings={
-            "os": "macos",
-            "screen": "2560x1440",
+            "os": "windows",
+            "gpu": "0x8086:0x3185",
             "languages": ["de-DE", "de"],
             "timezone": "Europe/Berlin",
-            "locale": "de_DE",
-            "hardware_concurrency": 12,
-            "device_memory": 16,
-            "stable_canvas": True,
-            "geolocation": {"lat": 52.52, "lon": 13.405, "accuracy": 25},
+            "webrtc_policy": "disable_non_proxied_udp",
         },
         proxy_config={
             "type": "http",
@@ -154,15 +150,9 @@ async def test_a_profile_keeps_its_settings_through_an_export_and_import(profile
     assert imported.name == "detailed"
     assert imported.notes == "do not lose me"
     assert imported.status == "inactive"
-    assert settings.os == "macos"
-    assert settings.screen == "2560x1440"
-    assert settings.languages == ["de-DE", "de"]
-    assert settings.timezone == "Europe/Berlin"
-    assert settings.locale == "de_DE"
-    assert settings.hardware_concurrency == 12
-    assert settings.device_memory == 16
-    assert settings.stable_canvas is True
-    assert settings.geolocation == {"lat": 52.52, "lon": 13.405, "accuracy": 25}
+    assert settings == original.browser_settings
+    # The machine is not in the sheet: the import's first launch generates it.
+    assert imported.fingerprint is None
     assert imported.proxy is not None
     assert imported.proxy.server == "proxy.example:8080"
     assert imported.proxy.password == "secret"
@@ -197,15 +187,15 @@ async def test_blank_rows_are_skipped_rather_than_counted(profile_manager):
 
 
 @pytest.mark.asyncio
-async def test_manual_geolocation_without_coordinates_falls_back_to_the_proxy(profile_manager):
-    """Half-filled coordinates would place the profile at (0, 0), off West Africa."""
+async def test_empty_location_cells_follow_the_proxy(profile_manager):
     excel_manager = ExcelManager(profile_manager)
-    data = build_sheet(excel_manager, [{"name": "p", "geo_mode": "manual"}])
+    data = build_sheet(excel_manager, [{"name": "p", "languages": "", "timezone": ""}])
 
     await excel_manager.import_profiles_from_excel(data)
 
     imported = (await profile_manager.list_profiles())[0]
-    assert imported.browser_settings.geolocation is None
+    assert imported.browser_settings.languages is None
+    assert imported.browser_settings.timezone is None
 
 
 @pytest.mark.asyncio
@@ -223,21 +213,20 @@ async def test_an_unknown_status_fails_the_row_instead_of_being_ignored(profile_
 @pytest.mark.asyncio
 async def test_a_moved_column_is_read_from_where_it_now_is(profile_manager):
     """Regression: columns were read by position, so a sheet the user rearranged
-    imported cleanly with the values in the wrong fields. Moving Locale ahead of
-    Timezone gave every profile a timezone of "de_DE" and a locale of
-    "Europe/Berlin", and nothing objected — most of these fields are free text.
+    imported cleanly with the values in the wrong fields. Swapping Languages and
+    Timezone would give every profile the other's value, and both are free text.
     """
     excel_manager = ExcelManager(profile_manager)
     rearranged = list(excel_manager.columns)
     timezone_at = next(i for i, c in enumerate(rearranged) if c[0] == "timezone")
-    locale_at = next(i for i, c in enumerate(rearranged) if c[0] == "locale")
-    rearranged[timezone_at], rearranged[locale_at] = (
-        rearranged[locale_at],
+    languages_at = next(i for i, c in enumerate(rearranged) if c[0] == "languages")
+    rearranged[timezone_at], rearranged[languages_at] = (
+        rearranged[languages_at],
         rearranged[timezone_at],
     )
     data = build_sheet(
         excel_manager,
-        [{"name": "p", "timezone": "Europe/Berlin", "locale": "de_DE"}],
+        [{"name": "p", "timezone": "Europe/Berlin", "languages": "de-DE, de"}],
         columns=rearranged,
     )
 
@@ -245,7 +234,7 @@ async def test_a_moved_column_is_read_from_where_it_now_is(profile_manager):
 
     imported = (await profile_manager.list_profiles())[0]
     assert imported.browser_settings.timezone == "Europe/Berlin"
-    assert imported.browser_settings.locale == "de_DE"
+    assert imported.browser_settings.languages == ["de-DE", "de"]
 
 
 @pytest.mark.asyncio
@@ -256,7 +245,7 @@ async def test_a_deleted_column_leaves_its_field_at_the_default(profile_manager)
     without_id = [c for c in excel_manager.columns if c[0] != "id"]
     data = build_sheet(
         excel_manager,
-        [{"name": "p", "os": "macos", "notes": "kept"}],
+        [{"name": "p", "os": "windows", "notes": "kept"}],
         columns=without_id,
     )
 
@@ -265,7 +254,7 @@ async def test_a_deleted_column_leaves_its_field_at_the_default(profile_manager)
     assert result["error_count"] == 0
     imported = (await profile_manager.list_profiles())[0]
     assert imported.name == "p"
-    assert imported.browser_settings.os == "macos"
+    assert imported.browser_settings.os == "windows"
     assert imported.notes == "kept"
 
 

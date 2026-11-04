@@ -1,5 +1,5 @@
 """
-SQLite storage layer for the Camoufox profile management system.
+SQLite storage layer for the Phasmid profile manager.
 """
 
 import json

@@ -10,16 +10,17 @@ from loguru import logger
 
 from phasmid_pm.config import get_settings
 
-from . import fingerprint_store, profile_archive, proxy_check
-from .browser_session import BrowserSessionManager
+from . import browser_install, machine, profile_archive, proxy_check
+from .browser_session import BrowserLaunchError, BrowserSessionManager, reap_orphan
 from .database import StaleWriteError, StorageManager
-from .fingerprint_generator import FingerprintGenerator
-from .leases import ProfileLocked, make_lease_holder
+from .launch import build_plan
+from .leases import ProfileLocked, holder_alive, make_lease_holder
 from .models import (
     BrowserSettings,
     Profile,
     ProfileGroup,
     ProfileStatus,
+    ProxyConfig,
     UsageStats,
     generate_profile_id,
 )
@@ -39,7 +40,8 @@ class ProfileManager:
         self.storage = storage_manager
         self.data_dir = Path(data_dir)
         self.profiles_dir = self.data_dir / "profiles"
-        self.fingerprint_generator = FingerprintGenerator()
+        # Per-session files (the profile JSON a browser reads, proxy arguments).
+        self.run_dir = self.data_dir / "run"
 
         # Active browser sessions are owned by a dedicated manager, which also
         # renews this process's leases for as long as its browsers are open.
@@ -54,8 +56,44 @@ class ProfileManager:
     async def initialize(self):
         """Initialize the profile manager and its database."""
         await self.storage.initialize()
+        await self.reap_orphans()
         self.browser_sessions.start_heartbeat()
         logger.info("ProfileManager initialized")
+
+    async def reap_orphans(self) -> int:
+        """Close browsers an earlier run of this app left behind; returns how many.
+
+        A run directory exists only while its browser is open, so one found at
+        startup belongs to an instance that died without closing it. Skipped
+        while the profile's lease is held by an instance that is still alive:
+        another app (the CLI beside the web UI) may be running it.
+        """
+        if not self.run_dir.is_dir():
+            return 0
+        count = 0
+        for run_dir in self.run_dir.iterdir():
+            if not run_dir.is_dir():
+                continue
+            lease = await self.storage.get_lease(run_dir.name)
+            if lease is not None and holder_alive(*lease):
+                continue
+            if reap_orphan(run_dir):
+                count += 1
+                logger.warning(f"Closed a browser left running for profile {run_dir.name}")
+            if lease is not None and lease[0]:
+                await self.storage.release_lease(run_dir.name, lease[0])
+        return count
+
+    async def _new_machine(self, settings: BrowserSettings) -> dict[str, Any] | None:
+        """A machine for these settings now, or None to pin one on the first launch.
+
+        Generation needs the Phasmid source tree; without it (the browser is not
+        installed yet) the profile is created unpinned and its first launch
+        generates the machine, exactly as for an imported spreadsheet row.
+        """
+        if not browser_install.installed_browser()[0]:
+            return None
+        return await machine.generate(settings)
 
     async def create_profile(
         self,
@@ -65,15 +103,15 @@ class ProfileManager:
         proxy_config: dict[str, Any] | None = None,
         generate_fingerprint: bool = True,
         notes: str | None = None,
-        fingerprint_preset: str | None = None,
         status: ProfileStatus | str | None = None,
         protected: bool = False,
     ) -> Profile:
         """Create a new profile.
 
-        ``fingerprint_preset`` is an id from :func:`fingerprint_store.list_presets`.
-        When given, the profile is pinned to that captured real device instead of
-        waiting for its first launch to generate a synthetic one.
+        With ``generate_fingerprint`` the machine is generated now (when the
+        browser is installed), so the profile can be inspected before it ever
+        runs; otherwise its first launch generates it. Either way the first
+        launch moves its location group to the exit address.
         """
         logger.info(f"Creating new profile: {name}")
 
@@ -86,75 +124,20 @@ class ProfileManager:
             # profiles their owner had deliberately parked.
             profile.status = ProfileStatus(status)
 
-        # Generate a browser fingerprint if requested
-        if generate_fingerprint:
-            fingerprint = await self.fingerprint_generator.generate_fingerprint(browser_settings)
-            profile.browser_settings = fingerprint
+        if isinstance(browser_settings, BrowserSettings):
+            profile.browser_settings = browser_settings
+        elif isinstance(browser_settings, dict):
+            # Rebuilt through the model rather than setattr, so values are
+            # validated. Keys the caller omitted keep their default.
+            profile.browser_settings = BrowserSettings(
+                **{**profile.browser_settings.model_dump(), **browser_settings}
+            )
 
-        # Apply user-provided browser settings over the generated fingerprint.
-        if browser_settings:
-            if isinstance(browser_settings, BrowserSettings):
-                profile.browser_settings = browser_settings
-            elif isinstance(browser_settings, dict):
-                # Rebuild through the model rather than setattr, so values are
-                # validated and enums coerced (a raw "webrtc_mode" string would
-                # otherwise survive as str and trip serialization). Keys the
-                # caller omitted keep their generated value; an explicit null
-                # clears one, which is how "geolocation from the proxy IP" works.
-                merged = profile.browser_settings.model_dump()
-                merged.update(browser_settings)
-                profile.browser_settings = BrowserSettings(**merged)
-
-        # Configure the proxy if provided
         if proxy_config:
-            from .models import ProxyConfig
-
             profile.proxy = ProxyConfig(**proxy_config)
 
-        # Pin a real device now, if one was chosen. Otherwise the first launch
-        # pins a generated fingerprint instead.
-        if fingerprint_preset:
-            preset = fingerprint_store.get_preset(fingerprint_preset)
-            if preset is None:
-                raise ValueError(f"Unknown fingerprint preset: {fingerprint_preset}")
-            # The catalogue can be read without the browser, but pinning a device
-            # cannot. Say so instead of quietly creating the profile and letting
-            # its first launch generate a different machine than the one chosen.
-            if not fingerprint_store.can_resolve():
-                raise ValueError(
-                    "The Camoufox browser is required to pin a device preset. "
-                    "Run 'camoufox fetch', then create the profile."
-                )
-
-            # A preset carries its own OS; keep the profile's setting in step so
-            # the two cannot describe different machines.
-            preset_os = fingerprint_preset.split(":", 1)[0]
-            if preset_os in ("windows", "macos", "linux"):
-                profile.browser_settings.os = preset_os
-
-            # The preset *is* the hardware, so generated values must not override
-            # it — an explicit hardware_concurrency wins over the preset's own and
-            # would give the profile a CPU count the real device never had. Values
-            # the caller asked for are still honoured.
-            asked_for = set(browser_settings) if isinstance(browser_settings, dict) else set()
-            described = fingerprint_store.describe_preset(preset)
-            if "hardware_concurrency" not in asked_for:
-                profile.browser_settings.hardware_concurrency = None
-            if "screen" not in asked_for and described.get("screen"):
-                profile.browser_settings.screen = described["screen"]
-
-            profile.fingerprint = fingerprint_store.resolve(
-                profile.to_camoufox_launch_options(), preset=preset
-            )
-            # can_resolve() only rules out a missing browser; resolution can still
-            # fail for other reasons. Check the result, not a proxy for it —
-            # otherwise the profile is created unpinned and its first launch
-            # quietly assigns a generated machine instead of the chosen device.
-            if not profile.fingerprint:
-                raise ValueError(
-                    f"Could not pin the device for preset {fingerprint_preset}. "
-                    "The profile was not created; see the server log for the cause."
-                )
+        if generate_fingerprint:
+            profile.fingerprint = await self._new_machine(profile.browser_settings)
 
         # Create the profile data directory
         profile_dir = Path(profile.get_storage_path(str(self.profiles_dir)))
@@ -232,22 +215,12 @@ class ProfileManager:
                 # Coerce proxy dict to ProxyConfig
                 elif key == "proxy" and value is not None:
                     if isinstance(value, dict):
-                        from phasmid_pm.core.models import ProxyConfig
-
                         value = ProxyConfig(**value)
                 elif key == "proxy" and value is None:
                     value = None
                 # Coerce browser_settings dict to BrowserSettings
                 elif key == "browser_settings" and value is not None:
                     if isinstance(value, dict):
-                        from phasmid_pm.core.models import BrowserSettings, WebRTCMode
-
-                        # Coerce webrtc_mode string to enum
-                        if "webrtc_mode" in value and isinstance(value["webrtc_mode"], str):
-                            try:
-                                value["webrtc_mode"] = WebRTCMode(value["webrtc_mode"])
-                            except ValueError:
-                                value["webrtc_mode"] = WebRTCMode.REPLACE
                         value = BrowserSettings(**value)
                 setattr(profile, key, value)
 
@@ -264,7 +237,7 @@ class ProfileManager:
         # does leave the profile saying two things, so it is worth a line in the
         # log; the profile response reports it as os_mismatch for the UI.
         if "browser_settings" in updates and profile.fingerprint:
-            pinned_os = fingerprint_store.pinned_os(profile.fingerprint)
+            pinned_os = machine.pinned_os(profile.fingerprint)
             if pinned_os and pinned_os != profile.browser_settings.os:
                 logger.warning(
                     f"Profile {profile_id} is now set to {profile.browser_settings.os} "
@@ -388,16 +361,11 @@ class ProfileManager:
 
         new_profile = Profile(**profile_data)
 
-        # Generate a new fingerprint if requested
+        # A new machine unless asked otherwise. Without this the clone would
+        # report the same GPU, screen, core count and seed as its source for the
+        # rest of its life: two profiles that are provably one computer.
         if regenerate_fingerprint:
-            fingerprint = await self.fingerprint_generator.generate_fingerprint()
-            new_profile.browser_settings = fingerprint
-            # And drop the pinned machine, which the copy above brought along.
-            # Without this the clone reported the same GPU, screen, core count
-            # and noise seeds as its source for the rest of its life: two
-            # profiles that are provably one computer. The next launch pins a new
-            # one, exactly as it does for a profile that has never run.
-            new_profile.fingerprint = None
+            new_profile.fingerprint = await self._new_machine(new_profile.browser_settings)
 
         # Create the directory for the new profile
         profile_dir = Path(new_profile.get_storage_path(str(self.profiles_dir)))
@@ -435,8 +403,8 @@ class ProfileManager:
         return new_profile
 
     async def rotate_profile_fingerprint(self, profile_id: str) -> Profile | None:
-        """Rotate a profile's fingerprint."""
-        logger.info(f"Rotating fingerprint for profile {profile_id}")
+        """Give a profile a new machine: new seed, hardware, screen and GPU."""
+        logger.info(f"Regenerating the machine of profile {profile_id}")
 
         profile = await self.get_profile(profile_id)
         if not profile:
@@ -444,35 +412,26 @@ class ProfileManager:
         if profile.protected:
             raise ProfileProtected(profile_id, "given a new fingerprint")
 
-        # Generate a new fingerprint
-        new_fingerprint = await self.fingerprint_generator.generate_fingerprint()
-        profile.browser_settings = new_fingerprint
-        # Drop the pinned machine too, otherwise the profile would keep the old
-        # hardware forever and only its high-level settings would change. The
-        # next launch resolves and pins a new one.
-        profile.fingerprint = None
+        before = machine.pinned_gpu(profile.fingerprint)
+        # Without the browser installed there is nothing to generate with; the
+        # old machine is dropped and the next launch generates a new one.
+        profile.fingerprint = await self._new_machine(profile.browser_settings)
         profile.updated_at = datetime.now()
 
-        # Persist the change
         # Version-checked for the same reason an edit is: this reads the row,
         # changes it and writes it back, so a save that lands in between would
         # otherwise be reverted without a word.
         await self.storage.update_profile(profile, expected_row_version=profile.row_version)
 
-        # Log the rotation
         await self.storage.log_usage(
             UsageStats(
                 profile_id=profile_id,
                 action="rotate_fingerprint",
-                details={
-                    "new_ua": new_fingerprint.user_agent[:50] + "..."
-                    if new_fingerprint.user_agent
-                    else None
-                },
+                details={"from_gpu": before, "to_gpu": machine.pinned_gpu(profile.fingerprint)},
             )
         )
 
-        logger.info(f"Fingerprint for profile {profile_id} rotated")
+        logger.info(f"Machine of profile {profile_id} regenerated")
         return profile
 
     async def get_profile_stats(self, profile_id: str) -> dict[str, Any]:
@@ -633,59 +592,6 @@ class ProfileManager:
 
         return success
 
-    async def refresh_browser_version(self, profile_id: str) -> Profile | None:
-        """Move a profile's pinned machine onto the installed browser version.
-
-        A pin never ages: a profile kept for months keeps advertising the browser
-        it was created with, and a version several releases behind is itself
-        unusual. This replaces only the browser-version part of the pin and keeps
-        the hardware, which is what a real computer looks like after an update.
-        """
-        profile = await self.get_profile(profile_id)
-        if not profile:
-            return None
-        if not profile.fingerprint:
-            # Nothing pinned yet, so there is nothing to age. The first launch
-            # will resolve against the current browser anyway.
-            raise ValueError("This profile has no pinned machine yet; launch it once first.")
-
-        # Resolve for the OS the *pin* describes, not the profile's current
-        # setting. The two can disagree — someone may have changed the OS dropdown
-        # after the machine was pinned — and taking the user agent from the
-        # setting would then put, say, a macOS browser on Windows hardware.
-        options = profile.to_camoufox_launch_options()
-        pinned_os = fingerprint_store.pinned_os(profile.fingerprint)
-        if pinned_os:
-            options["os"] = pinned_os
-
-        resolved = fingerprint_store.resolve(options)
-        if not resolved:
-            raise ValueError(
-                "Could not read the installed browser to refresh from. "
-                "Check that Camoufox is installed ('camoufox fetch')."
-            )
-
-        before = fingerprint_store.browser_major(profile.fingerprint)
-        profile.fingerprint = fingerprint_store.refresh_browser_version(
-            profile.fingerprint, resolved
-        )
-        after = fingerprint_store.browser_major(profile.fingerprint)
-        profile.updated_at = datetime.now()
-        # Version-checked for the same reason an edit is: this reads the row,
-        # changes it and writes it back, so a save that lands in between would
-        # otherwise be reverted without a word.
-        await self.storage.update_profile(profile, expected_row_version=profile.row_version)
-
-        await self.storage.log_usage(
-            UsageStats(
-                profile_id=profile_id,
-                action="refresh_browser_version",
-                details={"from": before, "to": after},
-            )
-        )
-        logger.info(f"Profile {profile_id} browser version refreshed: {before} -> {after}")
-        return profile
-
     async def reconcile_os(self, profile_id: str, keep_machine: bool) -> Profile | None:
         """Put a profile's OS setting and its pinned machine back in agreement.
 
@@ -697,8 +603,8 @@ class ProfileManager:
         ``keep_machine`` puts the setting back to the OS the pin describes and
         touches nothing else — the profile is the computer it has always been.
         Otherwise the setting wins and a new machine is pinned for it: new screen,
-        GPU, cores, fonts and noise seeds. For a warmed-up account that is a real
-        cost, which is why it is never the automatic answer.
+        GPU, cores, fonts and seed. For a warmed-up account that is a real cost,
+        which is why it is never the automatic answer.
         """
         profile = await self.get_profile(profile_id)
         if not profile:
@@ -706,7 +612,7 @@ class ProfileManager:
         if not profile.fingerprint:
             raise ValueError("This profile has no pinned machine yet, so nothing can disagree.")
 
-        pinned_os = fingerprint_store.pinned_os(profile.fingerprint)
+        pinned_os = machine.pinned_os(profile.fingerprint)
         if not pinned_os:
             raise ValueError("Cannot tell which operating system this profile's machine describes.")
         if pinned_os == profile.browser_settings.os:
@@ -721,17 +627,11 @@ class ProfileManager:
         if keep_machine:
             profile.browser_settings.os = pinned_os
         else:
-            resolved = fingerprint_store.resolve(profile.to_camoufox_launch_options())
-            if not resolved:
+            if not browser_install.installed_browser()[0]:
                 raise ValueError(
-                    "Could not resolve a machine for this operating system. "
-                    "Check that Camoufox is installed ('camoufox fetch')."
+                    "Generating a machine needs the browser. Install it in Settings first."
                 )
-            profile.fingerprint = resolved
-            # The stored screen described the machine that has just been replaced.
-            width, height = resolved.get("screen.width"), resolved.get("screen.height")
-            if width and height:
-                profile.browser_settings.screen = f"{width}x{height}"
+            profile.fingerprint = await machine.generate(profile.browser_settings)
 
         profile.updated_at = datetime.now()
         # Version-checked for the same reason an edit is: this reads the row,
@@ -756,19 +656,10 @@ class ProfileManager:
         return profile
 
     async def clear_geography(self, profile_ids: list[str]) -> dict[str, list[str]]:
-        """Drop the stored timezone and coordinates so the proxy supplies both.
+        """Drop the stated timezone so the proxy's exit address supplies it again.
 
-        Until recently every new profile was given the timezone and coordinates of
-        a randomly chosen region, so an old profile can claim Shanghai and be
-        handed a German proxy. Those profiles were deliberately not migrated —
-        rewriting a stored fingerprint under a live account is worse than leaving
-        it — so this is the offer instead: the same change, made deliberately.
-
-        Clearing the coordinates is the part that matters beyond tidiness. Their
-        presence turns Camoufox's IP lookup off, and that lookup is also what
-        fills the timezone and the WebRTC address; without them the profile is
-        back to deriving all three from where its proxy comes out, exactly as a
-        profile created today does.
+        The next launch moves each machine to its exit: zone, position, WebRTC
+        address and (unless they are stated too) languages. The hardware stays.
         """
         cleared: list[str] = []
         unchanged: list[str] = []
@@ -861,13 +752,18 @@ class ProfileManager:
         headless: bool = False,
         window_size: str | None = None,
         mode: str | None = None,
+        extra_args: list[str] | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
-        """Launch a Camoufox browser for a profile.
+        """Launch a Phasmid browser for a profile.
 
         ``mode`` is where it draws: ``headless``, ``virtual`` (its own VNC
         display) or ``window`` (the desktop); unset, ``headless`` and
-        ``PPM_VNC`` decide. Every mode can be driven from Playwright.
+        ``PPM_VNC`` decide. Every mode can be driven over CDP.
+
+        ``window_size`` is accepted for API compatibility and ignored: the
+        window is the profile's, so that the size a page measures is the size
+        the machine claims.
 
         The lease is taken first and is the authority on "is this profile
         already running". ``active_sessions`` below is only a fast local path:
@@ -875,9 +771,9 @@ class ProfileManager:
         another machine, and two of those answering "free" at once is the whole
         problem (see core/leases.py).
         """
-        from .browser_install import ensure_browser_ready
-
-        ensure_browser_ready()
+        if window_size:
+            logger.debug(f"Ignoring window_size {window_size!r}: the profile sets the window")
+        installation = browser_install.require_installation()
         acquired = await self.storage.acquire_lease(
             profile_id, self.lease_holder, get_settings().lease_ttl
         )
@@ -916,63 +812,67 @@ class ProfileManager:
                     "message": "Browser is already running for this profile",
                     "process_id": session.process_id,
                     "mode": session.mode,
-                    "playwright": session.playwright_endpoint is not None,
+                    "cdp": True,
                 }
 
-            profile.storage_path = str(profile_data_path(self, profile))
-            options = profile.to_camoufox_launch_options()
-            options["headless"] = headless
-            if window_size:
-                # Camoufox expects a (width, height) tuple, not a "1280x720" string.
-                try:
-                    width, height = (int(part) for part in window_size.lower().split("x"))
-                    options["window"] = (width, height)
-                except ValueError:
-                    logger.warning(f"Ignoring invalid window_size {window_size!r} (expected WxH)")
-            options.update(kwargs)
+            data_path = profile_data_path(self, profile)
+            data_path.mkdir(parents=True, exist_ok=True)
+            profile.storage_path = str(data_path)
+            settings = profile.browser_settings
 
-            # Pin the machine on the first launch and replay it on every one after,
-            # so the profile is the same computer each session instead of new
-            # hardware every time. The profile's own overrides still win, and geo,
-            # timezone and WebRTC stay dynamic so they follow the proxy.
-            pinned = profile.fingerprint
-            if not pinned:
-                # resolve() can do network I/O (it fetches the uBlock addon on a
-                # fresh install). It used to have to stay synchronous, because
-                # the whole Profile was written back afterwards and an await here
-                # would let a concurrent rename be reverted. The write below now
-                # names only the columns a launch owns, so there is nothing left
-                # for an await to clobber; moving this off the event loop is a
-                # separate change, and this comment is the note that it is safe.
-                pinned = fingerprint_store.resolve(options)
-                if pinned:
-                    profile.fingerprint = pinned
-            if pinned:
-                options["config"] = {**pinned, **options.get("config", {})}
+            # Where the browser will come out. Asked through the proxy itself,
+            # so the location group is placed at the address pages will see.
+            exit_ip: str | None = None
+            try:
+                exit_ip, _ = await proxy_check.resolve_exit_ip(
+                    profile.proxy, timeout=proxy_check.LAUNCH_TIMEOUT
+                )
+            except ConnectionError as exc:
+                if profile.proxy is not None:
+                    raise BrowserLaunchError(
+                        f"The proxy did not answer, so the browser was not started: {exc}"
+                    ) from exc
+                # No proxy and no network: the machine stays where it was.
+                logger.warning(f"Could not find this computer's public address: {exc}")
+
+            # Pin the machine on the first launch and replay it on every one after;
+            # move only its location group when the exit changed.
+            pin = profile.fingerprint
+            moved = False
+            if not pin:
+                pin = await machine.generate(settings, exit_ip)
+            elif machine.needs_move(pin, settings, exit_ip):
+                pin = await machine.move(pin, settings, exit_ip)
+                moved = True
+            profile.fingerprint = pin
 
             # A targeted write of the two columns a launch owns, not a whole
             # Profile: writing the row back would revert anything edited while
-            # the fingerprint above was being resolved, and would bump a version
-            # a concurrent editor is holding. Starting a browser is not an edit.
+            # the exit was being looked up, and would bump a version a
+            # concurrent editor is holding. Starting a browser is not an edit.
             profile.last_used = datetime.now()
             profile.updated_at = profile.last_used
-            await self.storage.set_launch_pin(profile_id, profile.fingerprint, profile.last_used)
+            await self.storage.set_launch_pin(profile_id, pin, profile.last_used)
 
             await self.storage.log_usage(
                 UsageStats(
                     profile_id=profile_id,
                     action="launch_browser",
-                    details={"headless": headless, "mode": mode},
+                    details={"headless": headless, "mode": mode, "moved": moved},
                 )
             )
 
-            # After the write on purpose: this only touches the launch options, so it
-            # cannot clobber the row, and it is the first await that is allowed to run
-            # between reading the profile and saving it.
-            await proxy_check.fill_what_geoip_would_have(profile.proxy, options)
-
+            plan = build_plan(
+                installation,
+                profile,
+                pin,
+                data_path,
+                self.run_dir,
+                headless=headless,
+                extra_args=extra_args,
+            )
             session = await self.browser_sessions.launch(
-                profile_id, options, on_exit=self._on_browser_exit, mode=mode
+                profile_id, plan, on_exit=self._on_browser_exit, mode=mode
             )
         except (Exception, asyncio.CancelledError):
             # CancelledError is a BaseException, not an Exception: an HTTP client
@@ -994,8 +894,13 @@ class ProfileManager:
             "message": "Browser launched successfully",
             "process_id": session.process_id,
             "mode": session.mode,
-            "playwright": session.playwright_endpoint is not None,
-            "camoufox_options": {"process_id": session.process_id, "options": options},
+            "cdp": True,
+            "launch": {
+                "process_id": session.process_id,
+                "argv": [arg for arg in plan.argv if not arg.startswith("@")],
+                "exit_ip": exit_ip,
+                "moved": moved,
+            },
         }
 
     async def _on_browser_exit(self, profile_id: str) -> None:

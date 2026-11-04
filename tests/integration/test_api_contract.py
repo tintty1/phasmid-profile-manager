@@ -51,7 +51,7 @@ async def test_late_validation_errors_use_the_same_shape(client):
     created = await client.post("/api/v1/profiles", json={"name": "late"})
     response = await client.put(
         f"/api/v1/profiles/{created.json()['id']}",
-        json={"browser_settings": {"hardware_concurrency": "many"}},
+        json={"browser_settings": {"os": "macos"}},
     )
     assert response.status_code == 422
     body = response.json()
@@ -106,7 +106,5 @@ def test_openapi_exposes_only_versioned_paths_with_stable_operation_ids():
 
 def test_deprecations_are_marked_in_the_schema():
     schema = app.openapi()
-    update_request = schema["components"]["schemas"]["ProfileUpdateRequest"]
-    assert update_request["properties"]["browser_os"].get("deprecated") is True
-    launch_response = schema["components"]["schemas"]["ProfileLaunchResponse"]
-    assert launch_response["properties"]["browser_session_id"].get("deprecated") is True
+    launch_request = schema["components"]["schemas"]["ProfileLaunchRequest"]
+    assert launch_request["properties"]["window_size"].get("deprecated") is True

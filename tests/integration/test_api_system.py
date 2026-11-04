@@ -7,17 +7,7 @@ import pytest
 from phasmid_pm.api import dependencies
 from phasmid_pm.api.dependencies import get_profile_manager
 from phasmid_pm.config import get_settings
-from phasmid_pm.core.browser_session import BrowserSession
-
-
-class FakeCamoufox:
-    """Stands in for a running AsyncCamoufox and records that it was closed."""
-
-    def __init__(self):
-        self.exits = 0
-
-    async def __aexit__(self, *_exc):
-        self.exits += 1
+from tests.fakes import launch_through_api
 
 
 @pytest.fixture
@@ -59,9 +49,7 @@ async def test_status_reports_what_is_there(client):
 
 @pytest.mark.asyncio
 async def test_status_counts_a_running_browser(client):
-    await client.post("/api/profiles", json={"name": "one"})
-    manager = get_profile_manager()
-    manager.browser_sessions.active_sessions["p1"] = BrowserSession("p1", camoufox=FakeCamoufox())
+    await launch_through_api(client, "one")
 
     body = (await client.get("/api/system/status")).json()
 
@@ -119,17 +107,13 @@ async def test_a_dry_run_reports_the_orphan_without_removing_it(client, storage_
 @pytest.mark.asyncio
 async def test_restart_closes_every_running_browser(client):
     manager = get_profile_manager()
-    camoufoxes = [FakeCamoufox(), FakeCamoufox()]
-    for profile_id, camoufox in zip(("p1", "p2"), camoufoxes, strict=True):
-        manager.browser_sessions.active_sessions[profile_id] = BrowserSession(
-            profile_id, camoufox=camoufox
-        )
+    sessions = [(await launch_through_api(client, name))[1] for name in ("p1", "p2")]
 
     response = await client.post("/api/system/restart")
 
     assert response.status_code == 200
     assert response.json()["success"] is True
-    assert [c.exits for c in camoufoxes] == [1, 1]
+    assert all(s.process.returncode is not None for s in sessions)
     assert manager.browser_sessions.list_active() == []
 
 

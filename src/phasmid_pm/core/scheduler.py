@@ -6,9 +6,9 @@ in this process and go through the same ``ProfileManager`` a manual one does;
 an external scheduler could only talk to the API and would be one more thing
 to install and keep running.
 
-What is schedulable is deliberately narrow: opening a profile's browser, and
-moving its pinned fingerprint onto the installed browser version. Hardware
-regeneration is not — see ``ScheduleAction`` in ``models.py`` for why.
+What is schedulable is deliberately narrow: opening a profile's browser, for
+a set time when asked (warming). Hardware regeneration is not; see
+``ScheduleAction`` in ``models.py`` for why.
 
 Time is read through an injectable ``now`` callable so tests can drive the
 clock instead of sleeping. All datetimes are naive local time, like the rest
@@ -25,7 +25,6 @@ from loguru import logger
 from .database import StorageManager
 from .models import (
     Schedule,
-    ScheduleAction,
     ScheduleKind,
     ScheduleRun,
     ScheduleRunOutcome,
@@ -106,8 +105,7 @@ class TaskScheduler:
         A scheduled browser launch is only meaningful at its time: warming a
         profile at 09:00 the next morning because the machine was off at 03:00
         is at best pointless, and replaying a backlog would open every missed
-        browser at once on startup. A version refresh simply happens at its
-        next occurrence instead. The gap is recorded as one ``missed`` run per
+        browser at once on startup. The gap is recorded as one ``missed`` run per
         schedule — one row, however many occurrences fell in it — so it is
         visible in the history rather than silently absorbed.
         """
@@ -200,7 +198,7 @@ class TaskScheduler:
                 schedule.enabled = False
                 schedule.updated_at = started
                 await self.storage.save_schedule(schedule)
-            elif schedule.action == ScheduleAction.LAUNCH:
+            else:  # ScheduleAction.LAUNCH, the only action
                 if self.profiles.browser_sessions.is_running(schedule.profile_id):
                     outcome = ScheduleRunOutcome.SKIPPED
                     message = "Browser already running; left it alone"
@@ -213,16 +211,6 @@ class TaskScheduler:
                             minutes=schedule.run_minutes
                         )
                         message += f"; closing after {schedule.run_minutes} min"
-            else:  # ScheduleAction.REFRESH_BROWSER
-                refreshed = await self.profiles.refresh_browser_version(schedule.profile_id)
-                outcome = ScheduleRunOutcome.OK
-                if refreshed is not None and refreshed.fingerprint is not None:
-                    from . import fingerprint_store
-
-                    major = fingerprint_store.browser_major(refreshed.fingerprint)
-                    message = f"Pin moved onto Firefox {major}" if major else "Pin refreshed"
-                else:
-                    message = "Pin refreshed"
         except Exception as exc:  # noqa: BLE001 - one bad run must not kill the loop
             message = str(exc) or exc.__class__.__name__
             logger.warning(f"Schedule {schedule.id} ({schedule.action}) failed: {message}")

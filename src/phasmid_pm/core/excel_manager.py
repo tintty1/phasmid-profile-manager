@@ -9,9 +9,10 @@ from loguru import logger
 from openpyxl import Workbook, load_workbook
 from openpyxl.comments import Comment
 from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.datavalidation import DataValidation
 
-from .models import BrowserSettings, Profile, WebRTCMode
+from .models import BrowserSettings, Profile
 from .profile_manager import ProfileManager
 
 
@@ -21,35 +22,32 @@ class ExcelManager:
     def __init__(self, profile_manager: ProfileManager):
         self.profile_manager = profile_manager
 
-        # Columns for export: (field, header, help text)
+        # Columns for export: (field, header, help text). The machine itself
+        # is not in the sheet: it is generated on the first launch of an
+        # imported row, from these settings.
         self.columns = [
             ("id", "Profile ID", "Auto-generated ID (read-only)"),
             ("name", "Profile name", "Unique profile name"),
             ("group", "Group", "Profile group name"),
             ("status", "Status", "active or inactive"),
-            ("os", "Operating system", "windows, macos or linux"),
-            ("screen", "Screen resolution", "For example: 1920x1080"),
-            ("window_width", "Window width", "Browser window width (800-3840)"),
-            ("window_height", "Window height", "Browser window height (600-2160)"),
-            ("languages", "Browser languages", "Comma-separated: en-US, en"),
-            ("timezone", "Timezone", "For example: Europe/Moscow"),
-            ("locale", "Locale", "For example: ru_RU"),
-            ("webrtc_mode", "WebRTC mode", "forward, replace, real or none"),
-            ("canvas_noise", "Canvas noise", "true or false"),
-            ("webgl_noise", "WebGL noise", "true or false"),
-            ("audio_noise", "Audio noise", "true or false"),
-            ("stable_canvas", "Stable canvas", "true or false; same canvas every launch"),
-            ("hardware_concurrency", "CPU cores", "Number of cores (1-32)"),
-            ("device_memory", "Device memory", "Memory in GB (1-128)"),
-            ("max_touch_points", "Touch points", "Number of touch points (0-10)"),
+            ("os", "Operating system", "linux or windows"),
+            ("gpu", "GPU", "vendor_id:device_id, e.g. 0x10de:0x2504; empty to draw one"),
+            (
+                "languages",
+                "Browser languages",
+                "Comma-separated: en-US, en; empty to follow the proxy",
+            ),
+            ("timezone", "Timezone", "For example: Europe/Berlin; empty to follow the proxy"),
+            (
+                "webrtc_policy",
+                "WebRTC policy",
+                "default, default_public_interface_only, default_public_and_private_interfaces "
+                "or disable_non_proxied_udp",
+            ),
             ("proxy_type", "Proxy type", "http, https, socks4, socks5 or empty"),
             ("proxy_server", "Proxy server", "host:port or empty"),
             ("proxy_username", "Proxy username", "Username or empty"),
             ("proxy_password", "Proxy password", "Password or empty"),
-            ("geo_mode", "Geolocation mode", "auto or manual"),
-            ("geo_latitude", "Latitude", "Latitude coordinate (-90 to 90)"),
-            ("geo_longitude", "Longitude", "Longitude coordinate (-180 to 180)"),
-            ("geo_accuracy", "Geolocation accuracy", "Accuracy in meters (1-10000)"),
             ("notes", "Notes", "Additional information about the profile"),
         ]
 
@@ -77,7 +75,7 @@ class ExcelManager:
             cell.alignment = Alignment(horizontal="center")
 
             # Add an explanatory comment
-            comment = Comment(comment_text, "CamoufoxProfileManager")
+            comment = Comment(comment_text, "PhasmidProfileManager")
             cell.comment = comment
 
         # Add profile rows
@@ -122,38 +120,16 @@ class ExcelManager:
             if hasattr(profile.status, "value")
             else str(profile.status),
             "os": browser_settings.os,
-            "screen": browser_settings.screen,
-            "window_width": browser_settings.window_width or "",
-            "window_height": browser_settings.window_height or "",
-            "languages": ", ".join(browser_settings.languages),
+            "gpu": browser_settings.gpu or "",
+            "languages": ", ".join(browser_settings.languages or []),
             "timezone": browser_settings.timezone or "",
-            "locale": browser_settings.locale or "",
-            "webrtc_mode": browser_settings.webrtc_mode.value
-            if hasattr(browser_settings.webrtc_mode, "value")
-            else str(browser_settings.webrtc_mode),
-            "canvas_noise": str(browser_settings.canvas_noise).lower(),
-            "webgl_noise": str(browser_settings.webgl_noise).lower(),
-            "audio_noise": str(browser_settings.audio_noise).lower(),
-            "stable_canvas": str(browser_settings.stable_canvas).lower(),
-            "hardware_concurrency": browser_settings.hardware_concurrency or "",
-            "device_memory": browser_settings.device_memory or "",
-            "max_touch_points": browser_settings.max_touch_points,
+            "webrtc_policy": browser_settings.webrtc_policy,
             "proxy_type": proxy.type.value
             if proxy and hasattr(proxy.type, "value")
             else (str(proxy.type) if proxy else ""),
             "proxy_server": proxy.server if proxy else "",
             "proxy_username": proxy.username if proxy else "",
             "proxy_password": proxy.password if proxy else "",
-            "geo_mode": "manual" if browser_settings.geolocation else "auto",
-            "geo_latitude": browser_settings.geolocation.get("lat", "")
-            if browser_settings.geolocation
-            else "",
-            "geo_longitude": browser_settings.geolocation.get("lon", "")
-            if browser_settings.geolocation
-            else "",
-            "geo_accuracy": browser_settings.geolocation.get("accuracy", "")
-            if browser_settings.geolocation
-            else "",
             "notes": profile.notes or "",
         }
 
@@ -170,36 +146,23 @@ class ExcelManager:
         ws.add_data_validation(status_validation)
         status_validation.add(f"D2:D{max_row}")
 
-        # OS validation
-        os_validation = DataValidation(
-            type="list", formula1='"windows,macos,linux"', allow_blank=True
-        )
-        ws.add_data_validation(os_validation)
-        os_validation.add(f"E2:E{max_row}")
+        def column(field: str) -> str:
+            index = next(i for i, (name, _, _) in enumerate(self.columns) if name == field)
+            return get_column_letter(index + 1)
 
-        # WebRTC mode validation
-        webrtc_validation = DataValidation(
-            type="list", formula1='"forward,replace,real,none"', allow_blank=True
-        )
-        ws.add_data_validation(webrtc_validation)
-        webrtc_validation.add(f"L2:L{max_row}")
-
-        # Boolean field validation
-        bool_validation = DataValidation(type="list", formula1='"true,false"', allow_blank=True)
-        ws.add_data_validation(bool_validation)
-        bool_validation.add(f"M2:O{max_row}")  # Canvas, WebGL, Audio noise
-
-        # Proxy type validation
-        proxy_validation = DataValidation(
-            type="list", formula1='"http,https,socks4,socks5"', allow_blank=True
-        )
-        ws.add_data_validation(proxy_validation)
-        proxy_validation.add(f"S2:S{max_row}")
-
-        # Geolocation mode validation
-        geo_validation = DataValidation(type="list", formula1='"auto,manual"', allow_blank=True)
-        ws.add_data_validation(geo_validation)
-        geo_validation.add(f"W2:W{max_row}")
+        for field, choices in (
+            ("os", "linux,windows"),
+            (
+                "webrtc_policy",
+                "default,default_public_interface_only,"
+                "default_public_and_private_interfaces,disable_non_proxied_udp",
+            ),
+            ("proxy_type", "http,https,socks4,socks5"),
+        ):
+            validation = DataValidation(type="list", formula1=f'"{choices}"', allow_blank=True)
+            ws.add_data_validation(validation)
+            letter = column(field)
+            validation.add(f"{letter}2:{letter}{max_row}")
 
     async def import_profiles_from_excel(self, excel_data: bytes) -> dict[str, Any]:
         """Import profiles from an Excel file."""
@@ -310,7 +273,9 @@ class ExcelManager:
             group=row_data["group"] or None,
             browser_settings=browser_settings,
             proxy_config=proxy_config,
-            generate_fingerprint=False,  # Use the data from Excel
+            # The first launch generates the machine: a spreadsheet of a hundred
+            # rows should import in seconds, not wait on the generator per row.
+            generate_fingerprint=False,
             # Both columns are exported and both were read here and then dropped
             # on the floor, so every import came back active and without notes.
             notes=row_data["notes"] or None,
@@ -319,54 +284,17 @@ class ExcelManager:
         result["created_count"] += 1
 
     def _create_browser_settings(self, row_data: dict[str, str]) -> BrowserSettings:
-        """Build a BrowserSettings object from Excel data."""
-        # Geolocation
-        geolocation = None
-        if (
-            row_data["geo_mode"] == "manual"
-            and row_data["geo_latitude"]
-            and row_data["geo_longitude"]
-        ):
-            geolocation = {
-                "lat": float(row_data["geo_latitude"]),
-                "lon": float(row_data["geo_longitude"]),
-                "accuracy": int(row_data["geo_accuracy"]) if row_data["geo_accuracy"] else 10,
-            }
-
-        return BrowserSettings(
-            os=row_data["os"] or "windows",
-            screen=row_data["screen"] or "1920x1080",
-            window_width=int(row_data["window_width"]) if row_data["window_width"] else 1280,
-            window_height=int(row_data["window_height"]) if row_data["window_height"] else 720,
-            languages=[lang.strip() for lang in row_data["languages"].split(",")]
-            if row_data["languages"]
-            else ["en-US", "en"],
-            timezone=row_data["timezone"] or "UTC",
-            locale=row_data["locale"] or "en_US",
-            webrtc_mode=WebRTCMode(row_data["webrtc_mode"])
-            if row_data["webrtc_mode"]
-            else WebRTCMode.REPLACE,
-            canvas_noise=row_data["canvas_noise"].lower() == "true"
-            if row_data["canvas_noise"]
-            else True,
-            webgl_noise=row_data["webgl_noise"].lower() == "true"
-            if row_data["webgl_noise"]
-            else True,
-            audio_noise=row_data["audio_noise"].lower() == "true"
-            if row_data["audio_noise"]
-            else True,
-            stable_canvas=row_data["stable_canvas"].lower() == "true"
-            if row_data["stable_canvas"]
-            else False,
-            hardware_concurrency=int(row_data["hardware_concurrency"])
-            if row_data["hardware_concurrency"]
-            else 4,
-            device_memory=int(row_data["device_memory"]) if row_data["device_memory"] else 8,
-            max_touch_points=int(row_data["max_touch_points"])
-            if row_data["max_touch_points"]
-            else 0,
-            geolocation=geolocation,
-        )
+        """Build a BrowserSettings object from Excel data; empty cells keep the defaults."""
+        values: dict[str, Any] = {"os": row_data["os"] or "linux"}
+        if row_data["gpu"]:
+            values["gpu"] = row_data["gpu"]
+        if row_data["languages"]:
+            values["languages"] = [lang.strip() for lang in row_data["languages"].split(",")]
+        if row_data["timezone"]:
+            values["timezone"] = row_data["timezone"]
+        if row_data["webrtc_policy"]:
+            values["webrtc_policy"] = row_data["webrtc_policy"]
+        return BrowserSettings(**values)
 
     def _create_proxy_config(self, row_data: dict[str, str]) -> dict[str, Any] | None:
         """Build a proxy configuration from Excel data."""

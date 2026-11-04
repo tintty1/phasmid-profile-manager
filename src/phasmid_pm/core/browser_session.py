@@ -1,74 +1,77 @@
-"""Browser session lifecycle: launch, monitor, and close Camoufox instances.
+"""Browser session lifecycle: launch, monitor, and close Phasmid instances.
 
-Extracted from ``profile_manager`` so profile CRUD and browser control have
-clear, independently testable responsibilities.
+Phasmid is a normal Chromium binary, so a session is a process this module
+starts itself, not a Playwright-owned browser: no driver adds its own switches
+(``--enable-automation`` and the rest) to the command line, and the browser
+looks like one a person opened. Automation attaches over CDP afterwards,
+through ``--remote-debugging-port=0``: Chrome picks a free loopback port and
+writes it to ``DevToolsActivePort`` in the user data directory.
 
-Cleanup is driven primarily by Playwright's ``close``/``disconnected`` events, so
-a user closing the browser window is detected and the session is torn down. OS
-process polling is only a best-effort fallback: with a persistent context the
-resolvable pid is Playwright's driver process, not Firefox, so it is not a
-reliable window-close signal on its own.
+The process is the browser (or proxyroute, its parent while it relays proxy
+credentials), started in a session of its own so the whole group can be
+signalled. Its exit is the close signal: a person closing the window, a
+crash, and :meth:`BrowserSession.terminate` all end in the same place.
 """
 
+from __future__ import annotations
+
 import asyncio
+import contextlib
+import json
 import os
 import shutil
+import signal
 import sys
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-import psutil
 from loguru import logger
 
 from ..config import get_settings
-from .vnc import VncDisplays, display_geometry
+from .vnc import VncDisplays
 
 if TYPE_CHECKING:
     # Type-only: importing StorageManager at runtime would be a cycle, since
     # database.py has no need of this module at all.
     from .database import StorageManager
 
-try:
-    from camoufox.async_api import AsyncCamoufox
-
-    CAMOUFOX_AVAILABLE = True
-except ImportError:  # pragma: no cover - exercised only without camoufox installed
-    AsyncCamoufox = None  # type: ignore[assignment, misc]
-    CAMOUFOX_AVAILABLE = False
-
 ExitHandler = Callable[[str], Awaitable[None]]
 
 
 class BrowserLaunchError(RuntimeError):
-    """Raised when a Camoufox browser fails to launch."""
+    """Raised when a Phasmid browser fails to launch."""
 
 
 # Where a headed browser draws is chosen per launch, not per instance.
 DISPLAY_MODES = ("headless", "virtual", "window")
 
+# How long Chrome gets to write DevToolsActivePort. A cold start of a new
+# profile directory under a software GPU takes a few seconds.
+STARTUP_TIMEOUT = 45.0
+# How long a graceful Browser.close gets before the process group is signalled,
+# and how long SIGTERM gets before SIGKILL.
+CLOSE_TIMEOUT = 10.0
+TERM_TIMEOUT = 5.0
+# In a session's run directory: the pid (and process group) of its browser.
+PID_FILE = "pid"
 
-def _resolve_process_id(obj: Any) -> int | None:
-    """Best-effort resolution of a driver/browser OS process id.
 
-    Playwright does not expose this publicly, so this walks known internal
-    attributes and returns ``None`` if none are available. It never fabricates a
-    placeholder pid. Note: for a persistent context this is the Playwright driver
-    process, used only as a forceful-kill fallback.
-    """
-    candidates = (
-        lambda b: b._browser_process.pid,  # noqa: SLF001
-        lambda b: b.browser._impl._connection._transport._proc.pid,  # noqa: SLF001
-        lambda b: b._impl._connection._transport._proc.pid,  # noqa: SLF001
-    )
-    for getter in candidates:
-        try:
-            pid = getter(obj)
-            if pid:
-                return int(pid)
-        except Exception:  # noqa: BLE001 - private attributes vary across versions
-            continue
-    return None
+@dataclass
+class LaunchPlan:
+    """Everything a launch needs, decided before the process starts."""
+
+    # The command up to and excluding the display switches this module adds.
+    argv: list[str]
+    user_data_dir: Path
+    # Where the session's private files go: the profile JSON, proxy arguments
+    # and the browser log. Removed when the session ends.
+    run_dir: Path
+    geometry: tuple[int, int] = (1920, 1080)
+    headless: bool = False
+    env: dict[str, str] = field(default_factory=dict)
 
 
 def resolve_display_mode(requested: str | None, headless: Any, vnc_default: bool) -> str:
@@ -76,7 +79,7 @@ def resolve_display_mode(requested: str | None, headless: Any, vnc_default: bool
 
     An explicit mode wins. Otherwise a headless launch stays headless and a
     headed one follows ``PPM_VNC``, which is only the default since a single
-    instance can now serve all three.
+    instance can serve all three.
     """
     if requested is not None:
         if requested not in DISPLAY_MODES:
@@ -139,46 +142,109 @@ def available_modes(vnc_default: bool) -> dict[str, Any]:
     }
 
 
-async def _bind_playwright(browser: Any, profile_id: str) -> str | None:
-    """Serve the browser to outside Playwright clients; returns the ws endpoint.
+def display_args(mode: str, environ: dict[str, str]) -> tuple[list[str], dict[str, str]]:
+    """The switches and environment that put the browser where ``mode`` says."""
+    if mode == "headless":
+        return ["--headless"], environ
+    if mode == "virtual":
+        # Chrome prefers Wayland whenever it can reach a compositor, which would
+        # put the window there instead of on the VNC display.
+        env = {k: v for k, v in environ.items() if k != "WAYLAND_DISPLAY"}
+        return ["--ozone-platform=x11"], env
+    return [], environ
 
-    Loopback only and unauthenticated, so it is never handed out: clients come
-    in through the authenticated relay in ``api/routes/automation.py``. A client
-    calling ``browser.close()`` only disconnects; the profile keeps running.
-    """
-    # A persistent profile launches as a BrowserContext; bind lives on its Browser.
-    target = browser.browser if hasattr(browser, "pages") else browser
+
+def _read_devtools_port(user_data_dir: Path) -> tuple[int, str] | None:
+    """The CDP port and browser target path Chrome wrote, once it has."""
     try:
-        result = await target.bind(f"phasmid-pm {profile_id}", host="127.0.0.1", port=0)
-        return result["endpoint"]
-    except Exception as exc:  # noqa: BLE001 - the browser is still usable by hand
-        logger.warning(f"Could not expose {profile_id} to Playwright clients: {exc}")
+        lines = (user_data_dir / "DevToolsActivePort").read_text().splitlines()
+        return int(lines[0]), lines[1]
+    except (OSError, ValueError, IndexError):
         return None
 
 
+def reap_orphan(run_dir: Path) -> bool:
+    """Kill the browser a dead manager left behind in ``run_dir``; remove the dir.
+
+    The browser runs in a session of its own, so it outlives a manager that was
+    killed. Left running it would hold the profile directory (Chrome's
+    SingletonLock hands a second launch over to it) with nobody watching it.
+    Only a process whose command line names this run directory is killed, so a
+    reused pid is never mistaken for it. Returns whether a browser was killed.
+    """
+    import psutil
+
+    killed = False
+    try:
+        pid = int((run_dir / PID_FILE).read_text().strip())
+        process = psutil.Process(pid)
+        if any(str(run_dir) in arg for arg in process.cmdline()):
+            os.killpg(pid, signal.SIGKILL)
+            killed = True
+    except (OSError, ValueError, psutil.Error):
+        pass
+    shutil.rmtree(run_dir, ignore_errors=True)
+    return killed
+
+
+def _log_tail(path: Path, limit: int = 800) -> str:
+    try:
+        return path.read_text(errors="replace").strip()[-limit:]
+    except OSError:
+        return ""
+
+
 class BrowserSession:
-    """A single running Camoufox browser tied to a profile."""
+    """A single running Phasmid browser tied to a profile."""
 
     def __init__(
         self,
         profile_id: str,
-        camoufox: Any,
-        process_id: int | None = None,
+        process: asyncio.subprocess.Process,
+        cdp_port: int,
+        cdp_path: str,
+        run_dir: Path | None = None,
         vnc: VncDisplays | None = None,
         mode: str = "window",
     ):
         self.profile_id = profile_id
-        self.camoufox = camoufox  # AsyncCamoufox context manager instance
-        self.process_id = process_id
+        self.process = process
+        self.process_id: int | None = process.pid
+        self.cdp_port = cdp_port
+        self.cdp_path = cdp_path
+        self.run_dir = run_dir
         self.started_at = datetime.now()
-        self.monitor_task: asyncio.Task | None = None
+        self.monitor_task: asyncio.Task[None] | None = None
         self.on_exit: ExitHandler | None = None
         # The displays registry, when this browser draws to its own VNC display.
         self.vnc = vnc
         self.mode = mode
-        # Loopback Playwright server for this browser; reached through the relay.
-        self.playwright_endpoint: str | None = None
         self._terminated = False
+
+    @property
+    def cdp_endpoint(self) -> str:
+        """The browser's own loopback CDP WebSocket; reached through the API relay."""
+        return f"ws://127.0.0.1:{self.cdp_port}{self.cdp_path}"
+
+    async def _close_over_cdp(self) -> None:
+        """Ask the browser to close itself, so it writes its session and cookies out."""
+        from websockets.asyncio.client import connect
+
+        async with connect(self.cdp_endpoint, open_timeout=3, max_size=None) as ws:
+            await ws.send(json.dumps({"id": 1, "method": "Browser.close"}))
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(ws.recv(), timeout=3)
+
+    def _signal_group(self, sig: int) -> None:
+        if self.process.returncode is not None or self.process_id is None:
+            return
+        try:
+            os.killpg(self.process_id, sig)
+        except ProcessLookupError:
+            pass
+        except PermissionError:
+            with contextlib.suppress(ProcessLookupError):
+                self.process.send_signal(sig)
 
     async def terminate(self) -> None:
         """Close the browser and stop its monitor task. Safe to call twice."""
@@ -187,43 +253,45 @@ class BrowserSession:
         self._terminated = True
         logger.info(f"Terminating browser session for profile {self.profile_id}")
 
-        # The monitor can be the caller here (_monitor -> _handle_exit -> terminate),
-        # and a task cannot await itself; cancelling is enough in that case.
+        # The monitor is the usual caller here (_monitor -> _handle_exit ->
+        # terminate). Cancelling the current task would abort the cleanup below
+        # at its next await, so only a monitor that is someone else is stopped.
         monitor = self.monitor_task
-        if monitor and not monitor.done():
+        if monitor and not monitor.done() and asyncio.current_task() is not monitor:
             monitor.cancel()
-            if asyncio.current_task() is not monitor:
-                try:
-                    await monitor
-                except asyncio.CancelledError:
-                    pass
+            with contextlib.suppress(asyncio.CancelledError):
+                await monitor
 
-        if self.camoufox is not None:
+        if self.process.returncode is None:
             try:
-                await self.camoufox.__aexit__(None, None, None)
-            except Exception as exc:  # noqa: BLE001
-                logger.warning(f"Error closing browser for {self.profile_id}: {exc}")
-
-        # Best-effort: make sure the driver process is gone.
-        if self.process_id:
+                await self._close_over_cdp()
+                await asyncio.wait_for(self.process.wait(), timeout=CLOSE_TIMEOUT)
+            except Exception as exc:  # noqa: BLE001 - fall through to signals
+                logger.debug(f"Graceful close of {self.profile_id} failed: {exc}")
+        if self.process.returncode is None:
+            self._signal_group(signal.SIGTERM)
             try:
-                process = psutil.Process(self.process_id)
-                process.terminate()
-                try:
-                    process.wait(timeout=5)
-                except psutil.TimeoutExpired:
-                    process.kill()
-            except psutil.NoSuchProcess:
-                pass
-            except Exception as exc:  # noqa: BLE001
-                logger.warning(f"Error killing process {self.process_id}: {exc}")
+                await asyncio.wait_for(self.process.wait(), timeout=TERM_TIMEOUT)
+            except TimeoutError:
+                self._signal_group(signal.SIGKILL)
+                with contextlib.suppress(Exception):
+                    await asyncio.wait_for(self.process.wait(), timeout=5)
+        # Children of the browser (renderers, the GPU process) share its group;
+        # one that outlived its parent must not keep the profile directory busy.
+        with contextlib.suppress(ProcessLookupError, PermissionError):
+            if self.process_id is not None:
+                os.killpg(self.process_id, signal.SIGKILL)
 
-        # Last: the browser has to be gone before its display is pulled away.
+        # The browser has to be gone before its display is pulled away.
         if self.vnc is not None:
             try:
                 await self.vnc.stop(self.profile_id)
             except Exception as exc:  # noqa: BLE001
                 logger.warning(f"Error stopping VNC display for {self.profile_id}: {exc}")
+
+        # The run directory holds proxy credentials; it must not outlive the session.
+        if self.run_dir is not None:
+            shutil.rmtree(self.run_dir, ignore_errors=True)
 
     def info(self) -> dict[str, Any]:
         """Return a serializable summary of this session."""
@@ -233,7 +301,7 @@ class BrowserSession:
             "started_at": self.started_at.isoformat(),
             "vnc": self.vnc is not None and self.vnc.get(self.profile_id) is not None,
             "mode": self.mode,
-            "playwright": self.playwright_endpoint is not None,
+            "cdp": True,
         }
 
 
@@ -242,25 +310,25 @@ class BrowserSessionManager:
 
     def __init__(
         self,
-        storage: "StorageManager | None" = None,
+        storage: StorageManager | None = None,
         holder: str | None = None,
         vnc: VncDisplays | None = None,
     ) -> None:
         self.active_sessions: dict[str, BrowserSession] = {}
         # Off unless a caller asks for it, so tests and the CLI never spawn Xvnc.
         self.vnc = vnc or VncDisplays(enabled=False)
-        # Profile id -> how many launches are currently inside camoufox.start().
-        # A count rather than a set, because two concurrent launches of one
+        # Profile id -> how many launches are currently starting a browser. A
+        # count rather than a set, because two concurrent launches of one
         # profile both mark it and the first to leave would otherwise clear the
         # mark while the other is still starting.
         self._starting: dict[str, int] = {}
         # The event loop only holds weak references to tasks, so a teardown
-        # suspended inside camoufox.__aexit__ could be garbage-collected and take
-        # the primary cleanup path with it. Hold a strong reference until done.
+        # suspended mid-close could be garbage-collected and take the cleanup
+        # with it. Hold a strong reference until done.
         self._exit_tasks: set[asyncio.Task[None]] = set()
         # Lease bookkeeping. Without a storage and a holder id (unit tests, and
         # anything that only watches processes) every lease call below is a
-        # no-op and this class behaves exactly as it did before leases existed.
+        # no-op.
         self._storage = storage
         self._holder = holder
         self._heartbeat_task: asyncio.Task[None] | None = None
@@ -282,10 +350,8 @@ class BrowserSessionManager:
         if self._heartbeat_task is None:
             return
         self._heartbeat_task.cancel()
-        try:
+        with contextlib.suppress(asyncio.CancelledError):
             await self._heartbeat_task
-        except asyncio.CancelledError:
-            pass
         self._heartbeat_task = None
 
     async def _heartbeat_loop(self, interval: float) -> None:
@@ -328,81 +394,91 @@ class BrowserSessionManager:
     def is_live(self, profile_id: str) -> bool:
         """Whether a browser is running *or* still starting for the profile.
 
-        ``is_running`` is false for the whole time ``camoufox.start()`` is
-        being awaited, so a lease released on that answer can be taken away
-        from a browser that is coming up. Lease decisions use this; the
-        user-facing "is it open" answers stay on ``is_running``.
+        ``is_running`` is false while the browser is starting, so a lease
+        released on that answer could be taken away from a browser that is
+        coming up. Lease decisions use this; the user-facing "is it open"
+        answers stay on ``is_running``.
         """
         return profile_id in self.active_sessions or profile_id in self._starting
 
     def list_active(self) -> list[dict[str, Any]]:
-        """Return summaries of the active sessions.
-
-        A pure read: it used to drop sessions whose driver process had gone,
-        which skipped ``terminate()`` and the exit handler and so leaked the
-        Camoufox context. Teardown belongs to the close event and, failing that,
-        to :meth:`_monitor`; both route through ``_handle_exit``.
-        """
+        """Return summaries of the active sessions. A pure read."""
         return [session.info() for session in self.active_sessions.values()]
 
     async def launch(
         self,
         profile_id: str,
-        launch_options: dict[str, Any],
+        plan: LaunchPlan,
         on_exit: ExitHandler | None = None,
         mode: str | None = None,
     ) -> BrowserSession:
-        """Launch a Camoufox browser and register a monitored session.
+        """Start a Phasmid browser and register a monitored session.
 
         ``mode`` picks the display per launch (see :func:`resolve_display_mode`).
         """
-        if not CAMOUFOX_AVAILABLE:
-            raise BrowserLaunchError(
-                "Camoufox is not installed. Install it with: pip install 'camoufox[geoip]'"
-            )
         if profile_id in self.active_sessions:
             return self.active_sessions[profile_id]
 
         window_requested = mode == "window"
-        mode = resolve_display_mode(mode, launch_options.get("headless"), self.vnc.enabled)
+        mode = resolve_display_mode(mode, plan.headless, self.vnc.enabled)
         use_vnc = mode == "virtual"
-        # A copy: the caller's options are echoed back in the API response.
-        launch_options = {
-            **launch_options,
-            # Kept when truthy, so Camoufox's own headless="virtual" still passes through.
-            "headless": (launch_options.get("headless") or True) if mode == "headless" else False,
-        }
-        base_env = {**os.environ, **(launch_options.get("env") or {})}
+        env = {**os.environ, **plan.env}
         # Asked for by name, a window has to have somewhere to go; by default the
-        # browser inherits this process's display untouched, as it always has.
-        # Only Linux picks a display through the environment.
+        # browser inherits this process's display untouched.
         if window_requested and sys.platform.startswith("linux"):
-            launch_options["env"] = window_env(base_env)
+            env = window_env(env)
+        switches, env = display_args(mode, env)
 
         # Counted before the first await: from here until the session is
         # registered, is_live() says this profile is coming up, and nothing
         # may hand its lease away.
         self._starting[profile_id] = self._starting.get(profile_id, 0) + 1
         try:
+            process: asyncio.subprocess.Process | None = None
+            log_path = plan.run_dir / "browser.log"
             try:
                 if use_vnc:
-                    display = await self.vnc.start(profile_id, *display_geometry(launch_options))
-                    # Firefox prefers Wayland whenever it can reach a compositor,
-                    # which would put the window there instead of on this display.
-                    base_env.pop("WAYLAND_DISPLAY", None)
-                    launch_options["env"] = {**base_env, "DISPLAY": display.name}
-                camoufox = AsyncCamoufox(**launch_options)
-                browser = await camoufox.start()
+                    display = await self.vnc.start(profile_id, *plan.geometry)
+                    env["DISPLAY"] = display.name
+                (plan.user_data_dir / "DevToolsActivePort").unlink(missing_ok=True)
+                with log_path.open("wb") as log:
+                    process = await asyncio.create_subprocess_exec(
+                        *plan.argv,
+                        *switches,
+                        env=env,
+                        stdin=asyncio.subprocess.DEVNULL,
+                        stdout=log,
+                        stderr=log,
+                        start_new_session=True,
+                    )
+                # For the next start of this app, should this one die without
+                # closing the browser: see ProfileManager.reap_orphans.
+                (plan.run_dir / PID_FILE).write_text(str(process.pid))
+                port, path = await self._wait_for_devtools(process, plan.user_data_dir, log_path)
             except (Exception, asyncio.CancelledError) as exc:
+                if process is not None and process.returncode is None:
+                    with contextlib.suppress(ProcessLookupError, PermissionError):
+                        os.killpg(process.pid, signal.SIGKILL)
+                    with contextlib.suppress(Exception):
+                        await asyncio.wait_for(process.wait(), timeout=5)
                 if use_vnc:
                     await self.vnc.stop(profile_id)
+                # It holds the proxy credentials, and no session will clean it up.
+                shutil.rmtree(plan.run_dir, ignore_errors=True)
                 if isinstance(exc, asyncio.CancelledError):
+                    raise
+                if isinstance(exc, BrowserLaunchError):
                     raise
                 raise BrowserLaunchError(f"Failed to launch browser: {exc}") from exc
 
-            process_id = _resolve_process_id(browser) or _resolve_process_id(camoufox)
             session = BrowserSession(
-                profile_id, camoufox, process_id, self.vnc if use_vnc else None, mode
+                profile_id,
+                process,
+                port,
+                path,
+                plan.run_dir,
+                self.vnc if use_vnc else None,
+                mode,
             )
             session.on_exit = on_exit
             self.active_sessions[profile_id] = session
@@ -413,32 +489,36 @@ class BrowserSessionManager:
             else:
                 self._starting.pop(profile_id, None)
 
-        # Primary signal: the browser/context closing (e.g. the user closes the window).
-        self._register_close_handler(browser, profile_id)
-        # Fallback: poll the driver pid, only if we could resolve one.
-        if process_id:
-            session.monitor_task = asyncio.create_task(self._monitor(profile_id, process_id))
-        # After registration, so a cancellation here leaves a tracked session
-        # rather than an orphaned browser.
-        session.playwright_endpoint = await _bind_playwright(browser, profile_id)
-
-        logger.info(f"Browser launched for profile {profile_id} (pid={process_id}, mode={mode})")
+        session.monitor_task = asyncio.create_task(self._monitor(profile_id, process))
+        logger.info(
+            f"Browser launched for profile {profile_id} (pid={process.pid}, mode={mode}, "
+            f"cdp port {port})"
+        )
         return session
 
-    def _register_close_handler(self, browser: Any, profile_id: str) -> None:
-        """Wire Playwright close/disconnect events to session cleanup."""
+    async def _wait_for_devtools(
+        self, process: asyncio.subprocess.Process, user_data_dir: Path, log_path: Path
+    ) -> tuple[int, str]:
+        """Wait until Chrome has written its CDP port, or report why it exited."""
         loop = asyncio.get_running_loop()
-
-        def _on_close(*_: Any) -> None:
-            task = loop.create_task(self._handle_exit(profile_id))
-            self._exit_tasks.add(task)
-            task.add_done_callback(self._exit_tasks.discard)
-
-        for event in ("close", "disconnected"):
-            try:
-                browser.on(event, _on_close)
-            except Exception:  # noqa: BLE001 - Browser vs BrowserContext expose different events
-                continue
+        deadline = loop.time() + STARTUP_TIMEOUT
+        while loop.time() < deadline:
+            found = _read_devtools_port(user_data_dir)
+            if found is not None:
+                return found
+            if process.returncode is not None:
+                break
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(process.wait(), timeout=0.2)
+        if process.returncode is not None:
+            tail = _log_tail(log_path)
+            raise BrowserLaunchError(
+                f"The browser exited during startup (code {process.returncode})"
+                + (f": {tail}" if tail else "")
+            )
+        raise BrowserLaunchError(
+            f"The browser did not open its debugging port within {STARTUP_TIMEOUT:.0f}s"
+        )
 
     async def _handle_exit(self, profile_id: str) -> None:
         """Tear down a session exactly once and notify the exit handler."""
@@ -493,8 +573,8 @@ class BrowserSessionManager:
                 count += 1
         return count
 
-    async def _monitor(self, profile_id: str, process_id: int) -> None:
-        """Fallback watchdog: clean up if the driver process disappears."""
-        while psutil.pid_exists(process_id):
-            await asyncio.sleep(10)
+    async def _monitor(self, profile_id: str, process: asyncio.subprocess.Process) -> None:
+        """Clean up when the browser process exits, whoever ended it."""
+        code = await process.wait()
+        logger.info(f"Browser for profile {profile_id} exited (code {code})")
         await self._handle_exit(profile_id)

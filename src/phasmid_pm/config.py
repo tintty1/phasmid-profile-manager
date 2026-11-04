@@ -1,7 +1,6 @@
 """Application settings loaded from environment variables (prefix ``PPM_``)."""
 
 import os
-import sys
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated
@@ -38,6 +37,14 @@ class Settings(BaseSettings):
     # the web UI. For a container or a server with no desktop; the Docker image
     # turns it on. Off, browsers open on whatever DISPLAY the process has.
     vnc: bool = False
+    # Phasmid. By default the newest release of phasmid_repo is installed into
+    # <data dir>/phasmid on request (Settings > Install browser). A local build
+    # and checkout can be used instead: phasmid_binary is the chrome executable,
+    # phasmid_source a Phasmid source tree (tools/genprofile, tools/proxyroute).
+    phasmid_repo: str = "tintty1/phasmid"
+    phasmid_release: str | None = None
+    phasmid_binary: str | None = None
+    phasmid_source: str | None = None
     backup_interval_hours: int = Field(default=24, ge=1)
     backup_retention: int = Field(default=7, ge=1)
 
@@ -71,13 +78,6 @@ def get_settings() -> Settings:
 
 def desktop_data_dir() -> Path:
     """A stable, writable location; never relative to the app bundle or cwd."""
-    if sys.platform == "darwin":
-        return Path.home() / "Library" / "Application Support" / "Phasmid Profile Manager"
-    if sys.platform == "win32":
-        return (
-            Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local")))
-            / "Phasmid Profile Manager"
-        )
     return (
         Path(os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local" / "share")))
         / "phasmid-profile-manager"

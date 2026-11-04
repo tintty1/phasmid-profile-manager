@@ -1,5 +1,6 @@
 """API routes for system functions."""
 
+import asyncio
 import time
 from pathlib import Path
 
@@ -11,8 +12,8 @@ from phasmid_pm import __version__
 from phasmid_pm.api.dependencies import get_profile_manager, get_storage_manager
 from phasmid_pm.api.models.system import (
     ApiResponse,
-    DevicePreset,
-    PresetListData,
+    GpuChoice,
+    GpuListData,
     ProfileCleanupResponse,
     ProfileDiagnosticResponse,
     SystemConfigData,
@@ -20,7 +21,7 @@ from phasmid_pm.api.models.system import (
     SystemStatusResponse,
 )
 from phasmid_pm.config import get_settings
-from phasmid_pm.core import fingerprint_store
+from phasmid_pm.core import machine
 from phasmid_pm.core.browser_install import installed_browser
 from phasmid_pm.core.cleanup import ProfileCleanupManager
 
@@ -169,26 +170,24 @@ async def restart_system():
 
 
 @router.get(
-    "/fingerprints/presets",
-    response_model=ApiResponse[PresetListData],
-    operation_id="list_fingerprint_presets",
-    summary="List real device presets.",
+    "/fingerprints/gpus",
+    response_model=ApiResponse[GpuListData],
+    operation_id="list_gpus",
+    summary="List the GPUs a machine may claim.",
     description=(
-        "Fingerprints captured from real machines, bundled with Camoufox. A profile "
-        "created from one is pinned to that device instead of a generated fingerprint."
+        "GPUs captured on a real host, and those the captured host class backs with "
+        "the same WebGL surface (Phasmid's genprofile claims). Pass one as "
+        "browser_settings.gpu to generate a machine with it. Empty until the browser "
+        "is installed."
     ),
 )
-async def list_fingerprint_presets(
-    os: str | None = None,
-):
-    """List the available real device fingerprint presets."""
-    presets = fingerprint_store.list_presets(os)
+async def list_gpus(os: str | None = None):
+    """List the GPUs a generated machine may claim."""
+    gpus = await asyncio.to_thread(machine.list_gpus, os)
     return ApiResponse(
         success=True,
-        message=f"{len(presets)} presets available",
-        data=PresetListData(
-            presets=[DevicePreset(**preset) for preset in presets], total=len(presets)
-        ),
+        message=f"{len(gpus)} GPUs available",
+        data=GpuListData(gpus=[GpuChoice(**gpu) for gpu in gpus], total=len(gpus)),
     )
 
 
@@ -218,7 +217,8 @@ async def get_system_config():
             user_auth_enabled=await get_storage_manager().count_users() > 0,
             encryption_enabled=bool(settings.secret_key),
             cors_origins=settings.cors_origins,
-            camoufox_available=installed_browser()[0],
+            browser_available=installed_browser()[0],
+            browser_version=installed_browser()[1],
             uptime_seconds=int(time.time() - startup_time),
         ),
     )

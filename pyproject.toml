@@ -1,18 +1,21 @@
 [project]
 name = "phasmid-profile-manager"
-version = "0.6.0rc1"
-description = "Self-hosted, open-source antidetect browser profile manager built on Camoufox"
+version = "0.1.0"
+description = "Self-hosted, open-source antidetect browser profile manager built on Phasmid"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 license = { text = "MIT" }
-authors = [{ name = "Phasmid Profile Manager Contributors" }]
+authors = [
+    { name = "Phasmid Profile Manager Contributors" },
+    { name = "Camoufox Profile Manager Contributors" },
+]
 keywords = [
-    "camoufox",
+    "phasmid",
     "antidetect",
     "browser-fingerprint",
-    "playwright",
+    "chromium",
+    "cdp",
     "fastapi",
-    "firefox",
 ]
 classifiers = [
     "License :: OSI Approved :: MIT License",
@@ -26,10 +29,18 @@ dependencies = [
     "pydantic>=2.10",
     "pydantic-settings>=2.6",
     "sqlalchemy>=2.0",
-    "camoufox[geoip]>=0.5.4",
-    # 1.60 for browser.bind(), which serves a running browser to outside clients.
-    "playwright>=1.60,<1.61",
-    # The Playwright relay connects to that server (api/routes/automation.py).
+    # Phasmid's genprofile runs from the installed release's source tree
+    # (core/genprofile_driver.py) with this interpreter, so its dependencies are
+    # ours, pinned exactly as tools/genprofile/pyproject.toml pins them.
+    "browserforge==1.2.4",
+    "apify-fingerprint-datapoints==0.15.0",
+    "jsonschema>=4.23",
+    "timezonefinder==9.2.0",
+    "timezonefinder-data==4.2026.5",
+    "maxminddb==3.2.0",
+    # Release archives are .tar.zst.
+    "zstandard>=0.25.0",
+    # The CDP relay (api/routes/automation.py) and the graceful close.
     "websockets>=13",
     "python-dotenv>=1.0",
     "python-multipart>=0.0.18",
@@ -47,21 +58,15 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-chrome-migration = [
-    "pycryptodome>=3.19",
-    "pyyaml>=6.0",
-    # Windows App-Bound Encryption (v20) unwrap needs the DPAPI/token APIs.
-    # Gated to Windows so a macOS/Linux install of the extra never pulls it in.
-    "pywin32>=306; sys_platform == 'win32'",
-]
 desktop = ["pywebview>=5.0"]
-build = ["pywebview>=5.0", "pyinstaller>=6.0"]
 dev = [
     "pytest>=8.3",
     "pytest-asyncio>=0.24",
     "pytest-cov>=6.0",
     "ruff>=0.8",
     "mypy>=1.13",
+    # Browser tests and the agent examples drive Phasmid over CDP with it.
+    "playwright>=1.60",
 ]
 
 [project.scripts]
@@ -100,12 +105,13 @@ exclude = [
 
 [tool.ruff]
 line-length = 100
-target-version = "py310"
+target-version = "py312"
 src = ["src", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "W", "C4"]
-ignore = ["E501"]
+# UP042: str() of a StrEnum differs from a (str, Enum); stored values rely on the latter.
+ignore = ["E501", "UP042", "UP046"]
 
 [tool.ruff.lint.flake8-bugbear]
 # FastAPI dependency-injection helpers are called in argument defaults by design.
@@ -127,14 +133,16 @@ extend-immutable-calls = [
 asyncio_mode = "auto"
 testpaths = ["tests"]
 markers = [
-    "browser: real Camoufox launch (opt-in, slow, requires 'camoufox fetch')",
+    "browser: real Phasmid launch (opt-in, slow, needs an installed browser)",
 ]
 
 [tool.mypy]
 packages = ["phasmid_pm"]
 ignore_missing_imports = true
-# Check our code only; third-party stubs (numpy via camoufox) can use newer syntax.
+# Check our code only.
 follow_imports = "silent"
+# Runs as a script inside the Phasmid source tree, where genprofile is importable.
+exclude = ["genprofile_driver\\.py$"]
 
 [tool.coverage.run]
 source = ["src/phasmid_pm"]

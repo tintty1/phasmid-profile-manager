@@ -1,6 +1,17 @@
-"""Tests for the browser session registry (no real browser launched)."""
+"""Tests for the browser session layer, against a fake browser binary.
+
+The fake (tests/fakes.py) is a real child process, so spawning, the wait for
+DevToolsActivePort, process-group signals and the exit monitor are all the
+production code paths; only Chrome itself is missing.
+"""
 
 import asyncio
+import json
+import os
+import signal
+import subprocess
+import sys
+from pathlib import Path
 
 import psutil
 import pytest
@@ -8,457 +19,271 @@ import pytest
 from phasmid_pm.core import browser_session as bs
 from phasmid_pm.core.browser_session import (
     BrowserLaunchError,
-    BrowserSession,
     BrowserSessionManager,
-    _resolve_process_id,
+    LaunchPlan,
+    display_args,
+    reap_orphan,
+    resolve_display_mode,
+    window_env,
 )
-
-
-class FakeBrowser:
-    """Stands in for the Playwright browser/context returned by a launch.
-
-    Records the handlers registered on it so that a user closing the window can
-    be simulated, which is the primary teardown signal in production.
-    """
-
-    def __init__(self, pid: int | None = None):
-        self.handlers: dict[str, list] = {}
-        if pid is not None:
-            self._browser_process = type("Proc", (), {"pid": pid})()
-
-    def on(self, event: str, handler) -> None:
-        self.handlers.setdefault(event, []).append(handler)
-
-    def fire(self, event: str) -> None:
-        for handler in self.handlers.get(event, []):
-            handler()
-
-
-class FakeCamoufox:
-    """Stands in for AsyncCamoufox, counting how often it was started and closed."""
-
-    def __init__(self, browser: FakeBrowser | None = None, fail: Exception | None = None):
-        self.browser = browser if browser is not None else FakeBrowser()
-        self.fail = fail
-        self.starts = 0
-        self.exits = 0
-        self.exit_error: Exception | None = None
-
-    async def start(self):
-        self.starts += 1
-        if self.fail is not None:
-            raise self.fail
-        return self.browser
-
-    async def __aexit__(self, *_exc):
-        self.exits += 1
-        if self.exit_error is not None:
-            raise self.exit_error
+from tests.fakes import write_fake_chrome
 
 
 @pytest.fixture
-def installed(monkeypatch):
-    """Pretend Camoufox is installed and hand every launch the given stand-in."""
-
-    def install(camoufox: FakeCamoufox) -> FakeCamoufox:
-        monkeypatch.setattr(bs, "CAMOUFOX_AVAILABLE", True)
-        monkeypatch.setattr(bs, "AsyncCamoufox", lambda **_options: camoufox)
-        return camoufox
-
-    return install
+def chrome(tmp_path) -> Path:
+    return write_fake_chrome(tmp_path)
 
 
-async def settle(manager: BrowserSessionManager) -> None:
-    """Await the teardown tasks a close event scheduled.
-
-    The manager keeps strong references to them, so this is deterministic: no
-    sleeping and no polling.
-    """
-    while manager._exit_tasks:
-        await asyncio.gather(*list(manager._exit_tasks))
-
-
-def test_register_and_list_active():
-    mgr = BrowserSessionManager()
-    mgr.active_sessions["p1"] = BrowserSession("p1", camoufox=None, process_id=None)
-    active = mgr.list_active()
-    assert active[0]["profile_id"] == "p1"
+def make_plan(tmp_path: Path, chrome: Path, name: str = "p1", **env: str) -> LaunchPlan:
+    run_dir = tmp_path / "run" / name
+    run_dir.mkdir(parents=True)
+    udd = tmp_path / "profiles" / name
+    udd.mkdir(parents=True, exist_ok=True)
+    return LaunchPlan(
+        argv=[str(chrome), f"--user-data-dir={udd}"],
+        user_data_dir=udd,
+        run_dir=run_dir,
+        geometry=(1600, 900),
+        env=dict(env),
+    )
 
 
-def test_is_running_guard():
-    mgr = BrowserSessionManager()
-    mgr.active_sessions["p1"] = BrowserSession("p1", camoufox=None, process_id=None)
-    assert mgr.is_running("p1") is True
-    assert mgr.is_running("p2") is False
+def launched_argv(plan: LaunchPlan) -> dict:
+    return json.loads((plan.user_data_dir / "argv.json").read_text())
 
 
-@pytest.mark.asyncio
-async def test_close_unknown_returns_false():
-    mgr = BrowserSessionManager()
-    assert await mgr.close("missing") is False
+async def wait_gone(manager: BrowserSessionManager, profile_id: str) -> None:
+    for _ in range(100):
+        if not manager.is_running(profile_id):
+            return
+        await asyncio.sleep(0.05)
+    raise AssertionError(f"{profile_id} is still running")
 
 
-@pytest.mark.asyncio
-async def test_close_removes_session():
-    mgr = BrowserSessionManager()
-    mgr.active_sessions["p1"] = BrowserSession("p1", camoufox=None, process_id=None)
-    assert await mgr.close("p1") is True
-    assert mgr.is_running("p1") is False
+# -- display modes -------------------------------------------------------------
 
 
-@pytest.mark.asyncio
-async def test_terminate_is_idempotent():
-    session = BrowserSession("p1", camoufox=None, process_id=None)
+def test_an_explicit_mode_wins():
+    assert resolve_display_mode("window", True, True) == "window"
+
+
+def test_headless_without_a_mode_stays_headless():
+    assert resolve_display_mode(None, True, True) == "headless"
+
+
+def test_a_headed_launch_follows_the_vnc_default():
+    assert resolve_display_mode(None, False, True) == "virtual"
+    assert resolve_display_mode(None, False, False) == "window"
+
+
+def test_an_unknown_mode_is_refused():
+    with pytest.raises(BrowserLaunchError, match="Unknown display mode"):
+        resolve_display_mode("fullscreen", False, False)
+
+
+def test_headless_adds_the_switch():
+    switches, env = display_args("headless", {"DISPLAY": ":0"})
+    assert switches == ["--headless"]
+    assert env == {"DISPLAY": ":0"}
+
+
+def test_a_virtual_display_keeps_chrome_off_wayland():
+    switches, env = display_args("virtual", {"WAYLAND_DISPLAY": "wayland-1", "HOME": "/h"})
+    assert switches == ["--ozone-platform=x11"]
+    assert "WAYLAND_DISPLAY" not in env
+
+
+def test_a_window_needs_a_desktop():
+    with pytest.raises(BrowserLaunchError, match="No desktop session"):
+        window_env({})
+    assert window_env({"DISPLAY": ":1"})["DISPLAY"] == ":1"
+
+
+def test_a_dangling_wayland_name_falls_back_to_x11(tmp_path):
+    env = window_env(
+        {"WAYLAND_DISPLAY": "wayland-9", "XDG_RUNTIME_DIR": str(tmp_path), "DISPLAY": ":0"}
+    )
+    assert "WAYLAND_DISPLAY" not in env
+
+
+# -- launching -----------------------------------------------------------------
+
+
+async def test_a_launch_reads_the_cdp_port_chrome_wrote(tmp_path, chrome):
+    manager = BrowserSessionManager()
+    plan = make_plan(tmp_path, chrome)
+    session = await manager.launch("p1", plan, mode="headless")
+    try:
+        assert manager.is_running("p1")
+        assert session.cdp_endpoint == "ws://127.0.0.1:1/devtools/browser/fake"
+        assert session.info()["mode"] == "headless"
+        assert session.info()["cdp"] is True
+        assert "--headless" in launched_argv(plan)["argv"]
+        assert (plan.run_dir / "pid").read_text() == str(session.process_id)
+        # A session of its own, so the whole group can be signalled.
+        assert os.getpgid(session.process_id) == session.process_id
+    finally:
+        await manager.close_all()
+
+
+async def test_a_stale_port_file_is_not_mistaken_for_the_new_browser(tmp_path, chrome, monkeypatch):
+    monkeypatch.setattr(bs, "STARTUP_TIMEOUT", 1.0)
+    manager = BrowserSessionManager()
+    plan = make_plan(tmp_path, chrome, FAKE_CHROME="hang")
+    (plan.user_data_dir / "DevToolsActivePort").write_text("9\n/devtools/browser/old\n")
+    with pytest.raises(BrowserLaunchError, match="did not open its debugging port"):
+        await manager.launch("p1", plan, mode="headless")
+    assert not manager.is_live("p1")
+    assert not plan.run_dir.exists(), "a failed launch must not leave credentials behind"
+
+
+async def test_a_browser_that_exits_at_startup_reports_why(tmp_path, chrome):
+    manager = BrowserSessionManager()
+    plan = make_plan(tmp_path, chrome, FAKE_CHROME="crash")
+    with pytest.raises(BrowserLaunchError, match="profile refused"):
+        await manager.launch("p1", plan, mode="headless")
+    assert not manager.is_running("p1")
+    assert not manager.is_live("p1")
+    assert not plan.run_dir.exists()
+
+
+async def test_launching_a_profile_twice_reuses_the_running_browser(tmp_path, chrome):
+    manager = BrowserSessionManager()
+    first = await manager.launch("p1", make_plan(tmp_path, chrome), mode="headless")
+    try:
+        again = await manager.launch("p1", make_plan(tmp_path, chrome, "p1b"), mode="headless")
+        assert again is first
+    finally:
+        await manager.close_all()
+
+
+async def test_a_virtual_display_is_started_and_named_in_the_environment(tmp_path, chrome):
+    class FakeDisplays:
+        enabled = True
+
+        def __init__(self):
+            self.started: list[tuple[str, int, int]] = []
+            self.stopped: list[str] = []
+
+        async def start(self, profile_id, width, height):
+            self.started.append((profile_id, width, height))
+            return type("D", (), {"name": ":123"})()
+
+        async def stop(self, profile_id):
+            self.stopped.append(profile_id)
+
+        def get(self, profile_id):
+            return object() if profile_id not in self.stopped else None
+
+    displays = FakeDisplays()
+    manager = BrowserSessionManager(vnc=displays)  # type: ignore[arg-type]
+    plan = make_plan(tmp_path, chrome, WAYLAND_DISPLAY="wayland-0")
+    session = await manager.launch("p1", plan, mode="virtual")
+    seen = launched_argv(plan)
+    assert displays.started == [("p1", 1600, 900)]
+    assert seen["display"] == ":123"
+    assert seen["wayland"] is None
+    assert "--ozone-platform=x11" in seen["argv"]
+    assert session.info()["vnc"] is True
+    await manager.close("p1")
+    assert displays.stopped == ["p1"], "the display goes once the browser is gone"
+
+
+# -- closing -------------------------------------------------------------------
+
+
+async def test_close_ends_the_process_and_removes_the_run_directory(tmp_path, chrome):
+    manager = BrowserSessionManager()
+    plan = make_plan(tmp_path, chrome)
+    session = await manager.launch("p1", plan, mode="headless")
+    pid = session.process_id
+    assert await manager.close("p1") is True
+    assert session.process.returncode is not None
+    assert not psutil.pid_exists(pid) or psutil.Process(pid).status() == psutil.STATUS_ZOMBIE
+    assert not plan.run_dir.exists()
+    assert await manager.close("p1") is False
+
+
+async def test_a_browser_that_ignores_sigterm_is_killed(tmp_path, chrome, monkeypatch):
+    monkeypatch.setattr(bs, "TERM_TIMEOUT", 0.3)
+    manager = BrowserSessionManager()
+    plan = make_plan(tmp_path, chrome, FAKE_CHROME="ignore-term")
+    session = await manager.launch("p1", plan, mode="headless")
+    await manager.close("p1")
+    assert session.process.returncode == -signal.SIGKILL
+
+
+async def test_terminate_is_idempotent(tmp_path, chrome):
+    manager = BrowserSessionManager()
+    session = await manager.launch("p1", make_plan(tmp_path, chrome), mode="headless")
     await session.terminate()
-    assert session._terminated is True
-    # A second call (e.g. close event racing the fallback monitor) must not raise.
     await session.terminate()
-
-
-@pytest.mark.asyncio
-async def test_handle_exit_notifies_once_and_prunes():
-    """A user-closed browser routes through _handle_exit exactly once."""
-    mgr = BrowserSessionManager()
-    calls = []
-    session = BrowserSession("p1", camoufox=None, process_id=None)
-
-    async def on_exit(profile_id):
-        calls.append(profile_id)
-
-    session.on_exit = on_exit
-    mgr.active_sessions["p1"] = session
-
-    await mgr._handle_exit("p1")
-    assert calls == ["p1"]
-    assert mgr.is_running("p1") is False
-
-    # Fallback monitor firing after the close event must be a no-op.
-    await mgr._handle_exit("p1")
-    assert calls == ["p1"]
-
-
-# -- Launching ----------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_launching_a_profile_twice_reuses_the_running_browser(installed):
-    """Two windows on one profile would have them writing the same databases."""
-    camoufox = installed(FakeCamoufox())
-    mgr = BrowserSessionManager()
-
-    first = await mgr.launch("p1", {})
-    second = await mgr.launch("p1", {})
-
-    assert second is first
-    assert camoufox.starts == 1
-
-
-@pytest.mark.asyncio
-async def test_a_failed_launch_leaves_nothing_running(installed):
-    """A half-registered session would make the profile unlaunchable forever:
-    every later attempt would report it as already running."""
-    installed(FakeCamoufox(fail=RuntimeError("no display")))
-    mgr = BrowserSessionManager()
-
-    with pytest.raises(BrowserLaunchError, match="no display"):
-        await mgr.launch("p1", {})
-
-    assert mgr.is_running("p1") is False
-    assert mgr.list_active() == []
-
-
-@pytest.mark.asyncio
-async def test_without_camoufox_installed_the_error_says_how_to_install_it(monkeypatch):
-    monkeypatch.setattr(bs, "CAMOUFOX_AVAILABLE", False)
-    mgr = BrowserSessionManager()
-
-    with pytest.raises(BrowserLaunchError, match="pip install"):
-        await mgr.launch("p1", {})
-
-
-@pytest.mark.asyncio
-async def test_no_watchdog_is_started_when_no_process_id_could_be_resolved(installed):
-    """The watchdog tears the session down as soon as its pid stops existing, so
-    starting one for a pid we never resolved would close the browser at once."""
-    installed(FakeCamoufox(FakeBrowser(pid=None)))
-    mgr = BrowserSessionManager()
-
-    session = await mgr.launch("p1", {})
-
-    assert session.process_id is None
-    assert session.monitor_task is None
-
-
-# -- The user closes the window ------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_closing_the_window_tears_the_session_down(installed):
-    camoufox = installed(FakeCamoufox())
-    mgr = BrowserSessionManager()
-    closed = []
-
-    async def on_exit(profile_id):
-        closed.append(profile_id)
-
-    await mgr.launch("p1", {}, on_exit=on_exit)
-    camoufox.browser.fire("close")
-    await settle(mgr)
-
-    assert closed == ["p1"]
-    assert mgr.is_running("p1") is False
-    assert camoufox.exits == 1
-
-
-@pytest.mark.asyncio
-async def test_close_and_disconnected_together_tear_down_only_once(installed):
-    """Playwright fires both for one window; the profile must not be logged as
-    closed twice, nor the context closed twice."""
-    camoufox = installed(FakeCamoufox())
-    mgr = BrowserSessionManager()
-    closed = []
-
-    async def on_exit(profile_id):
-        closed.append(profile_id)
-
-    await mgr.launch("p1", {}, on_exit=on_exit)
-    camoufox.browser.fire("close")
-    camoufox.browser.fire("disconnected")
-    await settle(mgr)
-
-    assert closed == ["p1"]
-    assert camoufox.exits == 1
-
-
-@pytest.mark.asyncio
-async def test_a_session_whose_process_vanished_is_still_listed(monkeypatch):
-    """Listing used to prune those sessions, which skipped terminate() and the
-    exit handler and so leaked the Camoufox context. Listing is a pure read."""
-    monkeypatch.setattr(psutil, "pid_exists", lambda _pid: False)
-    mgr = BrowserSessionManager()
-    mgr.active_sessions["p1"] = BrowserSession("p1", camoufox=None, process_id=4242)
-
-    assert [s["profile_id"] for s in mgr.list_active()] == ["p1"]
-    assert mgr.is_running("p1") is True
-
-
-@pytest.mark.asyncio
-async def test_the_watchdog_tears_down_when_the_process_disappears(monkeypatch):
-    monkeypatch.setattr(psutil, "pid_exists", lambda _pid: False)
-    mgr = BrowserSessionManager()
-    camoufox = FakeCamoufox()
-    session = BrowserSession("p1", camoufox=camoufox, process_id=4242)
-    closed = []
-
-    async def on_exit(profile_id):
-        closed.append(profile_id)
-
-    session.on_exit = on_exit
-    mgr.active_sessions["p1"] = session
-
-    await mgr._monitor("p1", 4242)
-
-    assert closed == ["p1"]
-    assert mgr.is_running("p1") is False
-    assert camoufox.exits == 1
-
-
-@pytest.mark.asyncio
-async def test_terminating_stops_the_watchdog():
-    """A watchdog outliving its session would tear down whatever session took its
-    place under the same profile id."""
-    session = BrowserSession("p1", camoufox=None, process_id=4242)
-    session.monitor_task = asyncio.create_task(asyncio.sleep(3600))
-
-    await session.terminate()
-
-    assert session.monitor_task.cancelled()
-
-
-# -- Teardown that goes wrong ---------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_a_browser_that_fails_to_close_is_still_forgotten(installed):
-    """A crashed browser raises on close. Keeping the session would leave the
-    profile permanently 'running' and impossible to launch again."""
-    camoufox = installed(FakeCamoufox())
-    camoufox.exit_error = RuntimeError("connection already closed")
-    mgr = BrowserSessionManager()
-
-    await mgr.launch("p1", {})
-
-    assert await mgr.close("p1") is True
-    assert mgr.is_running("p1") is False
-
-
-@pytest.mark.asyncio
-async def test_an_exit_handler_that_raises_does_not_break_teardown(installed):
-    camoufox = installed(FakeCamoufox())
-    mgr = BrowserSessionManager()
-
-    async def on_exit(_profile_id):
-        raise RuntimeError("database gone")
-
-    await mgr.launch("p1", {}, on_exit=on_exit)
-    camoufox.browser.fire("close")
-    await settle(mgr)
-
-    assert mgr.is_running("p1") is False
-    assert camoufox.exits == 1
-
-
-@pytest.mark.asyncio
-async def test_a_driver_that_survived_the_close_is_killed(monkeypatch):
-    """The graceful close is the primary path; the pid is the backstop, and a
-    surviving driver process holds the profile directory open."""
-    actions = []
-
-    class FakeProcess:
-        def __init__(self, pid):
-            actions.append(("open", pid))
-
-        def terminate(self):
-            actions.append(("terminate", None))
-
-        def wait(self, timeout=None):
-            actions.append(("wait", timeout))
-
-    monkeypatch.setattr(bs.psutil, "Process", FakeProcess)
-    session = BrowserSession("p1", camoufox=FakeCamoufox(), process_id=4242)
-
-    await session.terminate()
-
-    assert actions == [("open", 4242), ("terminate", None), ("wait", 5)]
-
-
-@pytest.mark.asyncio
-async def test_a_driver_that_ignores_terminate_is_killed(monkeypatch):
-    killed = []
-
-    class StubbornProcess:
-        def __init__(self, pid):
-            pass
-
-        def terminate(self):
-            pass
-
-        def wait(self, timeout=None):
-            raise psutil.TimeoutExpired(timeout)
-
-        def kill(self):
-            killed.append(True)
-
-    monkeypatch.setattr(bs.psutil, "Process", StubbornProcess)
-    session = BrowserSession("p1", camoufox=FakeCamoufox(), process_id=4242)
-
-    await session.terminate()
-
-    assert killed == [True]
-
-
-@pytest.mark.asyncio
-async def test_a_process_that_is_already_gone_is_not_an_error(monkeypatch):
-    def gone(_pid):
-        raise psutil.NoSuchProcess(_pid)
-
-    monkeypatch.setattr(bs.psutil, "Process", gone)
-    session = BrowserSession("p1", camoufox=FakeCamoufox(), process_id=4242)
-
-    await session.terminate()  # must not raise
-
-
-@pytest.mark.asyncio
-async def test_close_all_closes_every_browser(installed):
-    installed(FakeCamoufox())
-    mgr = BrowserSessionManager()
-    for profile_id in ("p1", "p2", "p3"):
-        mgr.active_sessions[profile_id] = BrowserSession(profile_id, camoufox=FakeCamoufox())
-
-    assert await mgr.close_all() == 3
-    assert mgr.list_active() == []
-
-
-# -- Resolving a process id -----------------------------------------------------
-
-
-def test_a_process_id_is_never_fabricated():
-    """Returning a placeholder pid would make the watchdog kill an unrelated
-    process, and would start a watchdog that immediately tears the session down."""
-
-    class Opaque:
-        pass
-
-    assert _resolve_process_id(Opaque()) is None
-
-
-def test_a_process_id_is_found_through_the_nested_transport():
-    """Playwright does not expose the pid, so it is read from internals that move
-    between versions; each known shape must keep working."""
-
-    class Nested:
-        pass
-
-    obj = Nested()
-    obj.browser = Nested()
-    obj.browser._impl = Nested()
-    obj.browser._impl._connection = Nested()
-    obj.browser._impl._connection._transport = Nested()
-    obj.browser._impl._connection._transport._proc = Nested()
-    obj.browser._impl._connection._transport._proc.pid = 777
-
-    assert _resolve_process_id(obj) == 777
-
-
-# -- Playwright access ----------------------------------------------------------
-
-
-class BindableBrowser(FakeBrowser):
-    """A Playwright Browser that can be served to outside clients."""
-
-    def __init__(self, fail: Exception | None = None):
-        super().__init__()
-        self.fail = fail
-        self.bound: list[tuple[str, str, int]] = []
-
-    async def bind(self, title, host=None, port=None):
-        if self.fail is not None:
-            raise self.fail
-        self.bound.append((title, host, port))
-        return {"endpoint": "ws://127.0.0.1:4100/abc"}
-
-
-class PersistentContext(FakeBrowser):
-    """A persistent profile launches as a context; bind lives on its browser."""
-
-    def __init__(self, browser: BindableBrowser):
-        super().__init__()
-        self.browser = browser
-        self.pages: list = []
-
-
-@pytest.mark.asyncio
-async def test_every_launch_is_served_to_playwright_on_loopback(installed):
-    inner = BindableBrowser()
-    installed(FakeCamoufox(PersistentContext(inner)))
-    mgr = BrowserSessionManager()
-
-    session = await mgr.launch("p1", {"headless": True})
-
-    # Loopback only: it has no auth of its own, the API relay is the way in.
-    assert inner.bound == [("phasmid-pm p1", "127.0.0.1", 0)]
-    assert session.playwright_endpoint == "ws://127.0.0.1:4100/abc"
-    assert mgr.list_active()[0]["playwright"] is True
-
-
-@pytest.mark.asyncio
-async def test_a_browser_that_cannot_be_served_still_launches(installed):
-    """A person can still use the window; only automation is unavailable."""
-    installed(FakeCamoufox(BindableBrowser(fail=RuntimeError("bind failed"))))
-    mgr = BrowserSessionManager()
-
-    session = await mgr.launch("p1", {"headless": True})
-
-    assert mgr.is_running("p1")
-    assert session.playwright_endpoint is None
-    assert mgr.list_active()[0]["playwright"] is False
+    assert session.process.returncode is not None
+    await manager.close("p1")
+
+
+async def test_a_browser_closed_from_outside_is_noticed_once(tmp_path, chrome):
+    """Someone closes the window: the process exits and the session goes with it."""
+    exits: list[str] = []
+
+    async def on_exit(profile_id: str) -> None:
+        exits.append(profile_id)
+
+    manager = BrowserSessionManager()
+    plan = make_plan(tmp_path, chrome)
+    session = await manager.launch("p1", plan, on_exit=on_exit, mode="headless")
+    os.kill(session.process_id, signal.SIGTERM)
+    await wait_gone(manager, "p1")
+    await asyncio.sleep(0.1)
+    assert exits == ["p1"]
+    assert not plan.run_dir.exists()
+
+
+async def test_an_exit_handler_that_raises_does_not_break_teardown(tmp_path, chrome):
+    async def on_exit(_profile_id: str) -> None:
+        raise RuntimeError("handler bug")
+
+    manager = BrowserSessionManager()
+    plan = make_plan(tmp_path, chrome)
+    session = await manager.launch("p1", plan, on_exit=on_exit, mode="headless")
+    os.kill(session.process_id, signal.SIGTERM)
+    await wait_gone(manager, "p1")
+
+
+async def test_close_all_closes_every_browser(tmp_path, chrome):
+    manager = BrowserSessionManager()
+    for name in ("a", "b"):
+        await manager.launch(name, make_plan(tmp_path, chrome, name), mode="headless")
+    assert await manager.close_all() == 2
+    assert manager.list_active() == []
+
+
+# -- orphans -------------------------------------------------------------------
+
+
+def test_an_orphan_naming_its_run_directory_is_killed(tmp_path, chrome):
+    run_dir = tmp_path / "run" / "p1"
+    run_dir.mkdir(parents=True)
+    udd = tmp_path / "udd"
+    process = subprocess.Popen(
+        [str(chrome), f"--user-data-dir={udd}", f"--phasmid-profile={run_dir}/profile.json"],
+        start_new_session=True,
+    )
+    (run_dir / "pid").write_text(str(process.pid))
+    assert reap_orphan(run_dir) is True
+    assert process.wait(timeout=5) == -signal.SIGKILL
+    assert not run_dir.exists()
+
+
+def test_a_reused_pid_is_never_killed(tmp_path):
+    run_dir = tmp_path / "run" / "p1"
+    run_dir.mkdir(parents=True)
+    bystander = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    try:
+        (run_dir / "pid").write_text(str(bystander.pid))
+        assert reap_orphan(run_dir) is False
+        assert bystander.poll() is None, "a process that does not name the run dir is not ours"
+        assert not run_dir.exists()
+    finally:
+        bystander.kill()
+        bystander.wait()

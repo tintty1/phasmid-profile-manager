@@ -5,7 +5,6 @@ API routes for managing profiles.
 import re
 import shutil
 import tempfile
-import uuid
 import zipfile
 from pathlib import Path
 from typing import Any
@@ -43,30 +42,11 @@ from phasmid_pm.core.browser_session import available_modes
 from phasmid_pm.core.database import StaleWriteError
 from phasmid_pm.core.excel_manager import ExcelManager
 from phasmid_pm.core.leases import ProfileLocked
+from phasmid_pm.core.machine import MachineError
 from phasmid_pm.core.models import BrowserSettings, ProfileStatus, ProxyConfig
 from phasmid_pm.core.profile_operations import ProfileProtected
 
 router = APIRouter()
-
-# Maps the deprecated flattened update fields onto their browser_settings keys.
-_FLATTENED_BROWSER_FIELDS = {
-    "browser_os": "os",
-    "browser_screen": "screen",
-    "browser_user_agent": "user_agent",
-    "browser_languages": "languages",
-    "browser_timezone": "timezone",
-    "browser_locale": "locale",
-    "browser_webrtc_mode": "webrtc_mode",
-    "browser_canvas_noise": "canvas_noise",
-    "browser_stable_canvas": "stable_canvas",
-    "browser_webgl_noise": "webgl_noise",
-    "browser_audio_noise": "audio_noise",
-    "browser_hardware_concurrency": "hardware_concurrency",
-    "browser_device_memory": "device_memory",
-    "browser_max_touch_points": "max_touch_points",
-    "browser_window_width": "window_width",
-    "browser_window_height": "window_height",
-}
 
 
 @router.get(
@@ -145,7 +125,6 @@ async def create_profile(request: ProfileCreateRequest):
             proxy_config=request.proxy_config,
             generate_fingerprint=request.generate_fingerprint,
             notes=request.notes,
-            fingerprint_preset=request.fingerprint_preset,
             protected=request.protected,
         )
 
@@ -231,16 +210,11 @@ async def update_profile(profile_id: str, request: ProfileUpdateRequest):
         # to refuse the save if someone else got there first.
         expected_row_version = sent.get("row_version")
 
-        # Browser settings arrive either as a nested object or as the deprecated
-        # flattened browser_* fields. Both are collected here and merged over the
-        # stored settings, so a client that sends only the fields it edits cannot
-        # wipe the rest of the generated fingerprint.
+        # Merged over the stored settings, so a client that sends only the
+        # fields it edits cannot wipe the rest.
         browser_updates: dict[str, Any] = {}
         if sent.get("browser_settings") is not None:
             browser_updates.update(sent["browser_settings"])
-        for field, key in _FLATTENED_BROWSER_FIELDS.items():
-            if sent.get(field) is not None:
-                browser_updates[key] = sent[field]
 
         if browser_updates:
             current_profile = await profile_manager.get_profile(profile_id)
@@ -318,7 +292,10 @@ async def delete_profile(profile_id: str):
     response_model=ProfileLaunchResponse,
     operation_id="launch_profile",
     summary="Launch a browser.",
-    description="Launch Camoufox with the profile's settings.",
+    description=(
+        "Start Phasmid with the profile's machine. The exit address is looked up "
+        "through the proxy first and the machine's location group moved there."
+    ),
 )
 async def launch_profile(profile_id: str, request: ProfileLaunchRequest, http: Request):
     """Launch a browser with a profile."""
@@ -331,30 +308,25 @@ async def launch_profile(profile_id: str, request: ProfileLaunchRequest, http: R
             headless=request.headless,
             window_size=request.window_size,
             mode=request.mode,
-            **request.additional_options or {},
+            extra_args=request.args,
         )
 
         logger.info(f"Launched browser for profile: {profile_id}")
 
         return ProfileLaunchResponse(
             profile_id=profile_id,
-            browser_session_id=str(uuid.uuid4()),
             status=browser_session.get("status", "launched"),
             message=browser_session.get("message", "Browser launched successfully"),
             process_id=browser_session.get("process_id"),
             mode=browser_session.get("mode"),
             # The relay beside this route, on whichever prefix the caller used.
-            playwright_endpoint=(
+            cdp_endpoint=(
                 str(http.url.replace(query="")).replace("http", "ws", 1).removesuffix("/launch")
-                + "/playwright"
-                if browser_session.get("playwright")
+                + "/cdp"
+                if browser_session.get("cdp")
                 else None
             ),
-            camoufox_options={
-                "process_id": browser_session.get("process_id"),
-                "status": browser_session.get("status"),
-                "options": browser_session.get("camoufox_options", {}),
-            },
+            launch=browser_session.get("launch", {}),
         )
 
     except ProfileLocked as e:
@@ -362,6 +334,8 @@ async def launch_profile(profile_id: str, request: ProfileLaunchRequest, http: R
         # can retry once the holder closes the browser, and a 500 would read as
         # "we broke" for an outcome the design intends.
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e)) from e
+    except MachineError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
     except Exception as e:
@@ -425,7 +399,9 @@ async def check_profile_proxy(profile_id: str):
     if not profile:
         raise HTTPException(status_code=404, detail=f"Profile with ID {profile_id} not found")
 
-    result = await proxy_check.check(profile.proxy, profile.browser_settings)
+    result = await proxy_check.check(
+        profile.proxy, profile.browser_settings, pin=profile.fingerprint
+    )
 
     # Kept on the profile so the list can show this answer later. A check the
     # user asked for is the only thing that writes it — nothing here polls.
@@ -507,36 +483,24 @@ async def get_profile_stats(profile_id: str):
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
-@router.post(
-    "/profiles/{profile_id}/refresh-browser",
-    response_model=ProfileResponse,
-    operation_id="refresh_browser_version",
-    summary="Refresh the pinned browser version.",
+@router.get(
+    "/profiles/{profile_id}/machine",
+    operation_id="get_profile_machine",
+    summary="Get the profile's whole machine.",
     description=(
-        "Move the profile's pinned machine onto the installed browser version, "
-        "keeping its hardware. A pin never ages on its own, and a browser several "
-        "releases behind is itself unusual."
+        "The stored Phasmid profile JSON (profiles/schema.json in the Phasmid "
+        "repository), as the next launch would hand it to the browser, apart from "
+        "a location move. 404 until a machine is generated."
     ),
 )
-async def refresh_browser_version(profile_id: str):
-    """Update only the browser-version part of a profile's pinned fingerprint."""
-    try:
-        profile_manager = get_profile_manager()
-        profile = await profile_manager.refresh_browser_version(profile_id)
-        if not profile:
-            raise HTTPException(status_code=404, detail=f"Profile with ID {profile_id} not found")
-        return ProfileResponse.from_profile(profile)
-    except HTTPException:
-        raise
-    except (StaleWriteError, ProfileProtected):
-        # Let it reach the app-level handler, which renders it as 409. The
-        # catch-all below would otherwise report a conflict as a server fault.
-        raise
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except Exception as exc:
-        logger.error(f"Failed to refresh the browser version for {profile_id}: {exc}")
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+async def get_profile_machine(profile_id: str) -> dict[str, Any]:
+    """Return the full pinned Phasmid profile."""
+    profile = await get_profile_manager().get_profile(profile_id)
+    if not profile:
+        raise HTTPException(status_code=404, detail=f"Profile with ID {profile_id} not found")
+    if not profile.fingerprint:
+        raise HTTPException(status_code=404, detail="This profile has no machine yet")
+    return profile.fingerprint
 
 
 @router.post(
@@ -547,7 +511,7 @@ async def refresh_browser_version(profile_id: str):
         "A profile's OS setting and its pinned machine can disagree, because the pin is "
         "what a page sees and the setting is only a dropdown. Either put the setting back "
         "to what the machine reports (no fingerprint change), or pin a new machine for the "
-        "setting — new screen, GPU, cores, fonts and noise seeds."
+        "setting — new screen, GPU, cores, fonts and seed."
     ),
 )
 async def reconcile_profile_os(profile_id: str, request: ReconcileOsRequest):
@@ -573,12 +537,11 @@ async def reconcile_profile_os(profile_id: str, request: ReconcileOsRequest):
 @router.post(
     "/profiles/clear-geography",
     response_model=ClearGeographyResponse,
-    summary="Clear stored timezone and coordinates",
+    summary="Clear stated timezones",
     description=(
-        "Unset the timezone and coordinates of the named profiles so both follow the "
-        "proxy's exit address again, as a profile created today does. Takes a list "
-        "because profiles created before that behaviour all carry a randomly chosen "
-        "region. Languages and locale are left alone."
+        "Unset the stated timezone of the named profiles so their next launch moves "
+        "each machine to its proxy's exit address: zone, position and WebRTC address. "
+        "Languages are left alone."
     ),
 )
 async def clear_profiles_geography(request: ClearGeographyRequest):
@@ -615,7 +578,7 @@ async def export_profile(profile_id: str):
 
     # Written to a temp file rather than memory: a warmed-up profile carries
     # tens of megabytes of storage and history.
-    handle = tempfile.NamedTemporaryFile(suffix=".camoufox.zip", delete=False)
+    handle = tempfile.NamedTemporaryFile(suffix=".phasmid.zip", delete=False)
     handle.close()
     destination = Path(handle.name)
 
@@ -635,7 +598,7 @@ async def export_profile(profile_id: str):
     return FileResponse(
         destination,
         media_type="application/zip",
-        filename=f"{safe_name}.camoufox.zip",
+        filename=f"{safe_name}.phasmid.zip",
         background=BackgroundTask(destination.unlink, missing_ok=True),
     )
 
@@ -744,7 +707,7 @@ async def export_profiles_to_excel():
         return Response(
             content=excel_data,
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            headers={"Content-Disposition": "attachment; filename=camoufox_profiles.xlsx"},
+            headers={"Content-Disposition": "attachment; filename=phasmid_profiles.xlsx"},
         )
 
     except Exception as e:

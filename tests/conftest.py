@@ -2,11 +2,15 @@
 
 import ipaddress
 import socket
+from dataclasses import dataclass, field
 
 import pytest
 
+from phasmid_pm.core import browser_install, proxy_check
+from phasmid_pm.core.browser_install import Installation
 from phasmid_pm.core.database import StorageManager
 from phasmid_pm.core.profile_manager import ProfileManager
+from tests.fakes import FakeGenprofile, write_fake_chrome
 
 
 def pytest_addoption(parser):
@@ -21,10 +25,9 @@ class NetworkBlocked(BaseException):
     """Deliberately not an Exception.
 
     Modules here catch Exception and carry on by design — `resolve_exit_ip`
-    treats a failed endpoint as a reason to try the next one, and
-    `fill_what_geoip_would_have` treats them all failing as a reason to leave the
-    launch alone. An AssertionError from the guard was swallowed by exactly that,
-    and a test that made three outbound requests passed. Measured, then changed.
+    treats a failed endpoint as a reason to try the next one. An AssertionError
+    from the guard was swallowed by exactly that, and a test that made three
+    outbound requests passed. Measured, then changed.
     """
 
 
@@ -92,6 +95,55 @@ def _is_loopback(host: str) -> bool:
         return False
 
 
+@dataclass
+class FakePhasmid:
+    """What the ``phasmid`` fixture installed, for tests to steer and inspect."""
+
+    installation: Installation
+    genprofile: FakeGenprofile
+    # The address resolve_exit_ip answers with; None makes it fail.
+    exit_ip: str | None = "198.51.100.7"
+    exit_lookups: list[object] = field(default_factory=list)
+    installed: bool = True
+
+
+@pytest.fixture
+def phasmid(tmp_path, monkeypatch, request) -> FakePhasmid:
+    """A Phasmid "installation": a fake browser binary and a fake genprofile.
+
+    Nothing here touches the network: the exit address a launch looks up comes
+    from ``exit_ip``. Browser tests (marked ``browser``) get the real thing.
+    """
+    root = tmp_path / "fake-phasmid"
+    root.mkdir()
+    installation = Installation("155.0.0.0-p1", write_fake_chrome(root), root / "source")
+    fake = FakePhasmid(installation, FakeGenprofile())
+    if request.node.get_closest_marker("browser") is not None:
+        return fake
+
+    async def resolve_exit_ip(proxy, timeout=proxy_check.DEFAULT_TIMEOUT):
+        fake.exit_lookups.append(proxy)
+        if fake.exit_ip is None:
+            raise ConnectionError("The proxy did not answer.")
+        return fake.exit_ip, 12
+
+    def require_installation() -> Installation:
+        if not fake.installed:
+            from phasmid_pm.core.browser_session import BrowserLaunchError
+
+            raise BrowserLaunchError("The browser needs setup.")
+        return fake.installation
+
+    monkeypatch.setattr(browser_install, "run_genprofile", fake.genprofile)
+    monkeypatch.setattr(
+        browser_install, "installed_browser", lambda: (fake.installed, fake.installation.version)
+    )
+    monkeypatch.setattr(browser_install, "current_installation", lambda: fake.installation)
+    monkeypatch.setattr(browser_install, "require_installation", require_installation)
+    monkeypatch.setattr(proxy_check, "resolve_exit_ip", resolve_exit_ip)
+    return fake
+
+
 @pytest.fixture
 async def storage(tmp_path):
     """A StorageManager backed by a throwaway SQLite database."""
@@ -102,15 +154,12 @@ async def storage(tmp_path):
 
 
 @pytest.fixture
-async def profile_manager(tmp_path, monkeypatch, request):
-    """A ProfileManager backed by a throwaway data directory."""
+async def profile_manager(tmp_path, phasmid):
+    """A ProfileManager backed by a throwaway data directory and a fake Phasmid."""
     storage = StorageManager(str(tmp_path / "test.db"))
     await storage.initialize()
     manager = ProfileManager(storage, str(tmp_path))
     await manager.initialize()
-    # Unit launches use fake browser sessions; installation itself has separate
-    # tests. A CI worker is not required to carry a 300 MB browser binary.
-    if request.node.get_closest_marker("browser") is None:
-        monkeypatch.setattr("phasmid_pm.core.browser_install.ensure_browser_ready", lambda: None)
     yield manager
+    await manager.browser_sessions.close_all()
     await storage.close()

@@ -1,260 +1,330 @@
-"""Offline browser setup: inspect before launch, explicit downloads, safe retries."""
+"""Installing a Phasmid release, offline: GitHub is an httpx MockTransport."""
 
 import hashlib
 import io
 import json
-from contextlib import nullcontext
-from types import SimpleNamespace
-from unittest.mock import Mock
+import tarfile
+import textwrap
+import time
+from pathlib import Path
 
+import httpx
 import pytest
+import zstandard
 
+from phasmid_pm.config import get_settings
 from phasmid_pm.core import browser_install
+from phasmid_pm.core.browser_install import GenprofileError, Installation
 from phasmid_pm.core.browser_session import BrowserLaunchError
+
+TAG = "155.0.8059.84-p1"
+REPO = "tintty1/phasmid"
+PIN_SHA = "c839d407" * 8
+
+
+@pytest.fixture(autouse=True)
+def isolated(tmp_path, monkeypatch):
+    """A data directory and a geoip cache of this test's own."""
+    monkeypatch.setenv("PPM_DB_PATH", str(tmp_path / "data" / "profiles.db"))
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    for name in ("PPM_PHASMID_BINARY", "PPM_PHASMID_SOURCE", "PPM_PHASMID_RELEASE"):
+        monkeypatch.delenv(name, raising=False)
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
+
+def tar_bytes(files: dict[str, bytes], top: str, mode: str = "w") -> bytes:
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode=mode) as archive:
+        for name, data in files.items():
+            info = tarfile.TarInfo(f"{top}/{name}" if not name.startswith("..") else name)
+            info.size = len(data)
+            info.mode = 0o755 if name == "chrome" else 0o644
+            archive.addfile(info, io.BytesIO(data))
+    return buffer.getvalue()
+
+
+def source_files() -> dict[str, bytes]:
+    return {
+        "chromium_version.txt": b"155.0.8059.84\n",
+        "profiles/schema.json": b"{}",
+        "tools/genprofile/genprofile/generate.py": b"",
+        "tools/genprofile/dbip-city-lite.json": json.dumps({"sha256": PIN_SHA}).encode(),
+        "tools/proxyroute/proxyroute.py": b"",
+    }
+
+
+def write_source(root: Path) -> Path:
+    for name, data in source_files().items():
+        path = root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+    return root
+
+
+def write_geoip(tmp_path: Path) -> None:
+    path = tmp_path / "cache" / "phasmid" / "geoip" / PIN_SHA / "dbip-city-lite.mmdb"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"mmdb")
+
+
+class FakeGitHub:
+    """The release API, the assets and the tag archive, from memory."""
+
+    def __init__(self, browser_files: dict[str, bytes] | None = None) -> None:
+        browser = tar_bytes(browser_files or {"chrome": b"#!/bin/sh\n"}, f"phasmid-{TAG}-linux-x64")
+        self.asset = zstandard.ZstdCompressor().compress(browser)
+        self.checksum = hashlib.sha256(self.asset).hexdigest()
+        self.source = tar_bytes(source_files(), f"phasmid-{TAG}", "w:gz")
+        self.requests: list[str] = []
+        self.releases = [
+            {"tag_name": "156.0.0.0-p1", "draft": True, "assets": []},
+            {"tag_name": "155.0.0.0-rc", "draft": False, "assets": []},
+            {
+                "tag_name": TAG,
+                "draft": False,
+                "prerelease": True,
+                "assets": [
+                    {"name": n, "browser_download_url": f"https://dl.example/{n}"}
+                    for n in (
+                        f"phasmid-{TAG}-linux-x64.tar.zst",
+                        f"phasmid-{TAG}-linux-x64.tar.zst.sha256",
+                    )
+                ],
+            },
+        ]
+
+    def handler(self, request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        self.requests.append(url)
+        if url == f"https://api.github.com/repos/{REPO}/releases":
+            return httpx.Response(200, json=self.releases)
+        if url.endswith(".tar.zst.sha256"):
+            return httpx.Response(200, text=f"{self.checksum}  phasmid-{TAG}-linux-x64.tar.zst\n")
+        if url.endswith(".tar.zst"):
+            return httpx.Response(200, content=self.asset)
+        if url == f"https://github.com/{REPO}/archive/refs/tags/{TAG}.tar.gz":
+            return httpx.Response(200, content=self.source)
+        return httpx.Response(404)
 
 
 @pytest.fixture
-def upstream_cache(tmp_path, monkeypatch):
-    """Every upstream cache path is temporary; imports never start downloads."""
-    from camoufox import addons, geolocation, multiversion, pkgman
+def github(monkeypatch, tmp_path):
+    fake = FakeGitHub()
+    real_client = httpx.Client
 
-    browser = tmp_path / "browser"
-    browser.mkdir()
-    executable = browser / "browser-executable"
-    executable.write_bytes(b"fake browser")
-    version = SimpleNamespace(is_supported=lambda: True, full_string="135.0-beta.1")
-    monkeypatch.setattr(multiversion, "get_active_path", lambda: browser)
-    monkeypatch.setattr(pkgman.Version, "from_path", lambda path: version)
-    monkeypatch.setattr(pkgman, "launch_path", lambda path: str(executable))
-    monkeypatch.setattr(
-        pkgman, "camoufox_path", Mock(side_effect=AssertionError("implicit download"))
-    )
-    monkeypatch.setattr(addons, "get_addon_path", lambda name: str(tmp_path / "addons" / name))
-    monkeypatch.setattr(geolocation, "MMDB_DIR", tmp_path / "mmdb")
-    monkeypatch.setattr(
-        geolocation,
-        "load_geoip_config",
-        lambda: {"name": "Example", "urls": {"combined": ["https://unused.invalid"]}},
-    )
-    monkeypatch.setattr(pkgman, "INSTALL_DIR", tmp_path / "cache")
-    monkeypatch.setattr(multiversion, "BROWSERS_DIR", tmp_path / "browsers")
-    return SimpleNamespace(
-        addons=addons,
-        geolocation=geolocation,
-        multiversion=multiversion,
-        pkgman=pkgman,
-        executable=executable,
-        version=version,
-        root=tmp_path,
-    )
+    def client(*args, **kwargs):
+        return real_client(transport=httpx.MockTransport(fake.handler))
+
+    monkeypatch.setattr(browser_install.httpx, "Client", client)
+
+    def fake_genprofile(command, args=None, installation=None):
+        assert command == "geoip"
+        write_geoip(tmp_path)
+        return {"path": "mmdb"}
+
+    monkeypatch.setattr(browser_install, "run_genprofile", fake_genprofile)
+    return fake
 
 
-def write_resources(cache):
-    for addon in cache.addons.DefaultAddons:
-        directory = cache.root / "addons" / addon.name
-        directory.mkdir(parents=True, exist_ok=True)
-        (directory / "manifest.json").write_text(json.dumps({"manifest_version": 2}))
-    cache.geolocation.MMDB_DIR.mkdir(exist_ok=True)
-    (cache.geolocation.MMDB_DIR / "example-combined.mmdb").write_bytes(b"location data")
+def wait_done(installer: browser_install.BrowserInstaller) -> browser_install.BrowserStatus:
+    for _ in range(200):
+        status = installer.status()
+        if status.state in ("ready", "error"):
+            return status
+        time.sleep(0.02)
+    raise AssertionError("the install never finished")
 
 
-def test_readiness_inspects_files_without_triggering_download(upstream_cache, monkeypatch):
-    cache = upstream_cache
-    monkeypatch.setattr(
-        cache.geolocation, "download_mmdb", Mock(side_effect=AssertionError("download"))
-    )
-    monkeypatch.setattr(
-        cache.addons, "maybe_download_addons", Mock(side_effect=AssertionError("download"))
-    )
-    installer = browser_install.BrowserInstaller()
-    assert browser_install.installed_browser() == (True, "135.0-beta.1")
-    assert installer.status().installed is False  # binary alone is insufficient
-    write_resources(cache)
-    status = installer.status()
-    assert status.installed and status.state == "ready"
-    assert status.version == "135.0-beta.1"
-    cache.pkgman.camoufox_path.assert_not_called()
+# -- readiness -----------------------------------------------------------------
 
 
-def test_missing_or_unsupported_browser_is_not_reported_ready(upstream_cache, monkeypatch):
-    cache = upstream_cache
-    write_resources(cache)
-    cache.executable.unlink()
-    assert browser_install.installed_browser()[0] is False
-    cache.executable.write_bytes(b"browser")
-    monkeypatch.setattr(
-        cache.pkgman.Version, "from_path", lambda path: SimpleNamespace(is_supported=lambda: False)
-    )
+def test_nothing_installed_is_not_ready_and_launching_says_what_to_do():
     assert browser_install.installed_browser() == (False, None)
+    with pytest.raises(BrowserLaunchError, match="Install browser"):
+        browser_install.require_installation()
 
 
-def test_invalid_addon_manifest_blocks_launch_without_fetching(upstream_cache):
-    cache = upstream_cache
-    write_resources(cache)
-    addon = next(iter(cache.addons.DefaultAddons))
-    (cache.root / "addons" / addon.name / "manifest.json").write_text("broken json")
-    assert not browser_install.browser_resources_ready()
-    with pytest.raises(BrowserLaunchError, match="Settings"):
-        browser_install.ensure_browser_ready()
-    cache.pkgman.camoufox_path.assert_not_called()
+def test_a_complete_download_is_ready(tmp_path):
+    root = tmp_path / "data" / "phasmid"
+    binary = root / TAG / "browser" / "chrome"
+    binary.parent.mkdir(parents=True)
+    binary.write_text("#!/bin/sh\n")
+    binary.chmod(0o755)
+    write_source(root / TAG / "source")
+    write_geoip(tmp_path)
+    (root / "current").write_text(TAG + "\n")
+
+    assert browser_install.installed_browser() == (True, TAG)
+    assert browser_install.require_installation().binary == binary
 
 
-def test_complete_resources_allow_launch_preflight(upstream_cache):
-    write_resources(upstream_cache)
-    browser_install.ensure_browser_ready()
+def test_without_the_location_database_it_is_not_ready(tmp_path):
+    root = tmp_path / "data" / "phasmid"
+    binary = root / TAG / "browser" / "chrome"
+    binary.parent.mkdir(parents=True)
+    binary.write_text("")
+    binary.chmod(0o755)
+    write_source(root / TAG / "source")
+    (root / "current").write_text(TAG)
+
+    assert browser_install.installed_browser() == (False, TAG)
 
 
-def test_missing_location_database_blocks_launch(upstream_cache):
-    write_resources(upstream_cache)
-    (upstream_cache.geolocation.MMDB_DIR / "example-combined.mmdb").unlink()
-    with pytest.raises(BrowserLaunchError):
-        browser_install.ensure_browser_ready()
+def test_a_current_file_naming_a_path_is_ignored(tmp_path):
+    root = tmp_path / "data" / "phasmid"
+    root.mkdir(parents=True)
+    (root / "current").write_text("../../etc")
+    assert browser_install.current_installation() is None
 
 
-def test_repeated_install_clicks_share_one_background_job(upstream_cache, monkeypatch):
-    threads = []
+def test_a_local_build_and_checkout_are_used_as_configured(tmp_path, monkeypatch):
+    binary = tmp_path / "build" / "chrome"
+    binary.parent.mkdir()
+    binary.write_text("")
+    binary.chmod(0o755)
+    source = write_source(tmp_path / "checkout")
+    write_geoip(tmp_path)
+    monkeypatch.setenv("PPM_PHASMID_BINARY", str(binary))
+    monkeypatch.setenv("PPM_PHASMID_SOURCE", str(source))
+    get_settings.cache_clear()
 
-    class FakeThread:
-        def __init__(self, **kwargs):
-            self.target = kwargs["target"]
-            threads.append(self)
+    installed, version = browser_install.installed_browser()
 
-        def start(self):
-            pass  # No real work until the explicit target is exercised below.
+    assert installed is True
+    assert version == "155.0.8059.84 (local)"
+    assert browser_install.current_installation() == Installation(version, binary, source)
 
-    monkeypatch.setattr(browser_install.threading, "Thread", FakeThread)
+
+# -- installing ----------------------------------------------------------------
+
+
+def test_the_newest_release_with_a_linux_build_is_installed(tmp_path, github):
     installer = browser_install.BrowserInstaller()
-    install = Mock()
-    monkeypatch.setattr(installer, "_install", install)
-    assert installer.start().state == "downloading"
-    assert installer.start().state == "downloading"
-    assert len(threads) == 1
-    install.assert_not_called()
-    assert threads[0].target == installer._run
+
+    installer.start()
+    status = wait_done(installer)
+
+    assert status.state == "ready", status.error
+    assert status.version == TAG
+    root = tmp_path / "data" / "phasmid"
+    assert (root / "current").read_text().strip() == TAG
+    assert (root / TAG / "browser" / "chrome").is_file()
+    assert (root / TAG / "source" / "tools" / "proxyroute" / "proxyroute.py").is_file()
+    assert not list((root / TAG).glob(".download-*")), "downloads are cleaned up"
 
 
-def test_install_failure_is_visible_and_can_be_retried(upstream_cache, monkeypatch):
+def test_a_checksum_mismatch_installs_nothing(tmp_path, github):
+    github.checksum = "0" * 64
     installer = browser_install.BrowserInstaller()
-    monkeypatch.setattr(browser_install, "installation_lock", nullcontext)
-    monkeypatch.setattr(installer, "_install", Mock(side_effect=OSError("disk full")))
-    installer._run()
-    failed = installer.status()
-    assert failed.state == "error" and "disk full" in failed.error
-    assert failed.progress is None
-    write_resources(upstream_cache)
-    monkeypatch.setattr(installer, "_install", lambda: None)
-    installer._run()
-    ready = installer.status()
-    assert ready.installed and ready.state == "ready"
-    assert ready.progress == 100 and ready.error is None
+
+    installer.start()
+    status = wait_done(installer)
+
+    assert status.state == "error"
+    assert "checksum" in (status.error or "")
+    assert not (tmp_path / "data" / "phasmid" / "current").exists()
+    assert not (tmp_path / "data" / "phasmid" / TAG / "browser").exists()
 
 
-def test_swallowed_upstream_addon_failure_is_not_reported_as_success(upstream_cache, monkeypatch):
-    cache = upstream_cache
-    monkeypatch.setattr(cache.geolocation, "download_mmdb", lambda: None)
-    monkeypatch.setattr(cache.addons, "maybe_download_addons", lambda addons: None)
+def test_an_archive_reaching_outside_its_directory_is_refused(tmp_path, monkeypatch):
+    evil = tar_bytes({"chrome": b"", "../../escaped": b"x"}, f"phasmid-{TAG}-linux-x64")
+    archive = tmp_path / "evil.tar.zst"
+    archive.write_bytes(zstandard.ZstdCompressor().compress(evil))
+
+    with pytest.raises(tarfile.TarError):
+        browser_install.extract_zst(archive, tmp_path / "out" / "browser")
+
+    assert not (tmp_path / "escaped").exists()
+
+
+def test_a_pinned_tag_is_asked_for_by_name():
+    release = FakeGitHub().releases[-1]
+
+    def handler(request):
+        if str(request.url).endswith(f"/releases/tags/{TAG}"):
+            return httpx.Response(200, json=release)
+        return httpx.Response(404)
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        assert browser_install.find_release(client, REPO, TAG)["tag_name"] == TAG
+
+
+def test_no_linux_build_is_an_error_that_says_so():
+    def handler(request):
+        return httpx.Response(200, json=[{"tag_name": "x", "draft": False, "assets": []}])
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(RuntimeError, match="Linux x64 build"):
+            browser_install.find_release(client, REPO, None)
+
+
+def test_repeated_install_clicks_share_one_job(github):
     installer = browser_install.BrowserInstaller()
-    monkeypatch.setattr(browser_install, "installation_lock", nullcontext)
-    installer._run()
-    assert installer.status().state == "error"
-    assert "could not be downloaded" in installer.status().error
+
+    installer.start()
+    installer.start()
+    wait_done(installer)
+
+    assert sum(url.endswith(".tar.zst") for url in github.requests) == 1
 
 
-@pytest.mark.parametrize("manifest", [None, "broken json"])
-def test_incomplete_addon_cache_is_preserved_then_retried(upstream_cache, monkeypatch, manifest):
-    cache = upstream_cache
-    addon = next(iter(cache.addons.DefaultAddons))
-    incomplete = cache.root / "addons" / addon.name
-    incomplete.mkdir(parents=True)
-    (incomplete / "partial-file").write_text("diagnostic")
-    if manifest is not None:
-        (incomplete / "manifest.json").write_text(manifest)
-    monkeypatch.setattr(cache.geolocation, "download_mmdb", lambda: None)
-    monkeypatch.setattr(
-        cache.addons, "maybe_download_addons", lambda addons: write_resources(cache)
-    )
-    browser_install.BrowserInstaller()._install()
-    assert (
-        incomplete.with_name(incomplete.name + ".incomplete") / "partial-file"
-    ).read_text() == "diagnostic"
-    assert browser_install.browser_resources_ready()
+def test_a_failed_install_can_be_retried(github):
+    installer = browser_install.BrowserInstaller()
+    github.checksum = "0" * 64
+    installer.start()
+    assert wait_done(installer).state == "error"
+
+    github.checksum = hashlib.sha256(github.asset).hexdigest()
+    installer.start()
+
+    assert wait_done(installer).state == "ready"
 
 
-def fake_fetcher(cache, monkeypatch, *, checksum=None, payload=b"downloaded archive"):
-    """Exercise our real streaming/hash adapter inside an upstream installer stub."""
-    result = {}
+# -- running genprofile --------------------------------------------------------
 
-    def initialize(fetcher):
-        fetcher.github_repo = "repo/test"
-        fetcher.installed_sha256 = checksum
-        fetcher._version_obj = SimpleNamespace(
-            version="135.0", build="beta.1", full_string="135.0-beta.1"
+
+@pytest.fixture
+def driver(tmp_path, monkeypatch):
+    """A stand-in for genprofile_driver.py that answers with what it is told."""
+    script = tmp_path / "driver.py"
+    script.write_text(
+        textwrap.dedent(
+            """\
+            import json, sys
+            mode = json.loads(sys.argv[3]).get("mode")
+            if mode == "ok":
+                print(json.dumps({"profile": {"seed": "s"}}))
+            elif mode == "refused":
+                print(json.dumps({"error": "GenerationError: no capture"}))
+                sys.exit(2)
+            else:
+                print("Traceback: something broke", file=sys.stderr)
+                sys.exit(1)
+            """
         )
-        fetcher._url = "https://unused.invalid/browser.zip"
-        fetcher._selected_version = None
-        fetcher.is_prerelease = False
-
-    def install(fetcher, replace=False):
-        result["replace"] = replace
-        output = io.BytesIO()
-        fetcher.download_file(output, fetcher._url)
-        result["download"] = output.read()
-
-    class Response:
-        headers = {"content-length": str(len(payload))}
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *args):
-            pass
-
-        def raise_for_status(self):
-            pass
-
-        def iter_bytes(self):
-            yield payload[:5]
-            yield payload[5:]
-
-    monkeypatch.setattr(cache.pkgman.CamoufoxFetcher, "__init__", initialize)
-    monkeypatch.setattr(cache.pkgman.CamoufoxFetcher, "install", install)
-    monkeypatch.setattr(cache.multiversion, "get_repo_name", lambda repo: "test")
-    monkeypatch.setattr(cache.multiversion, "version_folder_name", lambda *args: "target")
-    monkeypatch.setattr(browser_install.httpx, "stream", lambda *args, **kwargs: Response())
-    monkeypatch.setattr(browser_install, "installed_browser", lambda: (False, None))
-    monkeypatch.setattr(browser_install, "browser_resources_ready", lambda: True)
-    monkeypatch.setattr(cache.addons, "maybe_download_addons", lambda addons: None)
-    return result
-
-
-def test_browser_download_checks_hash_before_unpacking(upstream_cache, monkeypatch):
-    payload = b"downloaded archive"
-    result = fake_fetcher(
-        upstream_cache, monkeypatch, checksum=hashlib.sha256(payload).hexdigest(), payload=payload
     )
-    installer = browser_install.BrowserInstaller()
-    installer._install()
-    assert result["download"] == payload
-    assert result["replace"] is False
-    assert installer.status().progress == 97
+    monkeypatch.setattr(browser_install, "DRIVER", script)
+    return Installation("x", tmp_path / "chrome", write_source(tmp_path / "src"))
 
 
-def test_hash_mismatch_fails_before_installer_accepts_archive(upstream_cache, monkeypatch):
-    result = fake_fetcher(upstream_cache, monkeypatch, checksum="0" * 64)
-    with pytest.raises(RuntimeError, match="checksum"):
-        browser_install.BrowserInstaller()._install()
-    assert "download" not in result
+def test_genprofile_answers_are_returned(driver):
+    assert browser_install.run_genprofile("generate", {"mode": "ok"}, driver) == {
+        "profile": {"seed": "s"}
+    }
 
 
-def test_retry_replaces_only_target_with_missing_executable(upstream_cache, monkeypatch):
-    cache = upstream_cache
-    result = fake_fetcher(cache, monkeypatch)
-    target = cache.multiversion.BROWSERS_DIR / "test" / "target"
-    target.mkdir(parents=True)
-    (target / "version.json").write_text("{}")
-    monkeypatch.setattr(
-        cache.pkgman, "launch_path", Mock(side_effect=FileNotFoundError("missing binary"))
-    )
-    browser_install.BrowserInstaller()._install()
-    assert result["replace"] is True
-    assert (target / "version.json").exists()  # Our code delegates replacement to upstream.
+def test_a_refusal_is_raised_in_genprofiles_words(driver):
+    with pytest.raises(GenprofileError, match="no capture"):
+        browser_install.run_genprofile("generate", {"mode": "refused"}, driver)
+
+
+def test_a_crash_reports_the_end_of_stderr(driver):
+    with pytest.raises(GenprofileError, match="something broke"):
+        browser_install.run_genprofile("generate", {"mode": "crash"}, driver)
+
+
+def test_without_a_source_tree_genprofile_cannot_run():
+    with pytest.raises(GenprofileError, match="source tree"):
+        browser_install.run_genprofile("gpus")

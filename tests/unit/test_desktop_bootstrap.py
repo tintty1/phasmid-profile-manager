@@ -86,26 +86,15 @@ def test_corrupted_persistent_key_fails_without_overwriting_it(tmp_path):
     assert key_path.read_text() == "invalid saved key"
 
 
-@pytest.mark.parametrize(
-    ("platform", "environment", "suffix"),
-    [
-        ("darwin", {}, "Library/Application Support/Phasmid Profile Manager"),
-        (
-            "win32",
-            {"LOCALAPPDATA": "configured-local"},
-            "configured-local/Phasmid Profile Manager",
-        ),
-        ("linux", {"XDG_DATA_HOME": "configured-xdg"}, "configured-xdg/phasmid-profile-manager"),
-    ],
-)
-def test_platform_data_directory_does_not_depend_on_working_directory(
-    tmp_path, monkeypatch, platform, environment, suffix
-):
+def test_the_data_directory_does_not_depend_on_the_working_directory(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "configured-xdg"))
+    assert REAL_DESKTOP_DATA_DIR() == tmp_path / "configured-xdg" / "phasmid-profile-manager"
+
+
+def test_without_xdg_the_data_directory_is_under_home(tmp_path, monkeypatch):
     from pathlib import Path
 
-    monkeypatch.setattr(config.sys, "platform", platform)
+    monkeypatch.delenv("XDG_DATA_HOME", raising=False)
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path / "home"))
-    for key, value in environment.items():
-        monkeypatch.setenv(key, str(tmp_path / value))
-    expected = (tmp_path / "home" / suffix) if platform == "darwin" else tmp_path / suffix
+    expected = tmp_path / "home" / ".local" / "share" / "phasmid-profile-manager"
     assert REAL_DESKTOP_DATA_DIR() == expected

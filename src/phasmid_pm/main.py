@@ -106,8 +106,8 @@ app = FastAPI(
     title="Phasmid Profile Manager API",
     description=(
         "Self-hosted, open-source antidetect browser profile manager built on "
-        "Camoufox. Manage profiles and groups, generate fingerprints, launch the "
-        "browser, and drive everything over a REST API.\n\n"
+        "Phasmid. Manage profiles and groups, generate machines, launch the "
+        "browser, and drive everything over a REST API and CDP.\n\n"
         "Endpoints live under `/api/v1`. The unversioned `/api/...` paths from "
         "before 0.2 keep working as aliases but are left out of this schema; "
         "see the stability contract in `docs/api.md`."

@@ -1,6 +1,6 @@
-"""The Playwright relay: who may connect, and that messages cross it intact.
+"""The CDP relay: who may connect, and that messages cross it intact.
 
-A WebSocket echo server stands in for the browser's Playwright server, so no
+A WebSocket echo server stands in for the browser's CDP endpoint, so no
 browser is launched.
 """
 
@@ -16,7 +16,7 @@ from websockets.asyncio.server import serve
 from phasmid_pm.api.routes import automation
 from phasmid_pm.main import app
 
-URL = "/api/v1/profiles/p1/playwright"
+URL = "/api/v1/profiles/p1/cdp"
 
 
 @pytest.fixture
@@ -50,7 +50,7 @@ def relay(monkeypatch, echo_endpoint):
     """The relay with auth and the session registry replaced by stand-ins."""
     state = {
         "authorized": True,
-        "sessions": {"p1": SimpleNamespace(playwright_endpoint=echo_endpoint)},
+        "sessions": {"p1": SimpleNamespace(cdp_endpoint=echo_endpoint)},
     }
 
     async def credentials_ok(_token, _key):
@@ -63,10 +63,10 @@ def relay(monkeypatch, echo_endpoint):
 
 
 def test_relays_text_frames_as_text(relay):
-    """Playwright's protocol is JSON in text frames; a binary echo would break it."""
+    """CDP is JSON in text frames; a binary echo would break it."""
     with TestClient(app).websocket_connect(URL) as ws:
-        ws.send_text('{"id":1,"method":"initialize"}')
-        assert ws.receive_text() == '{"id":1,"method":"initialize"}'
+        ws.send_text('{"id":1,"method":"Browser.getVersion"}')
+        assert ws.receive_text() == '{"id":1,"method":"Browser.getVersion"}'
 
 
 def test_relays_binary_frames_as_binary(relay):
@@ -108,7 +108,7 @@ def test_profile_that_is_not_running(relay):
 
 
 def test_browser_that_could_not_be_served(relay):
-    relay["sessions"]["p1"].playwright_endpoint = None
+    relay["sessions"]["p1"].cdp_endpoint = None
     with pytest.raises(WebSocketDisconnect) as exc, TestClient(app).websocket_connect(URL):
         pass
     assert exc.value.code == 4404

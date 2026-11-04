@@ -92,12 +92,12 @@ async def test_an_unsaved_proxy_can_be_checked(client, exit_in_tokyo):
 
 
 @pytest.mark.asyncio
-async def test_socks_credentials_are_reported_as_a_launch_failure(client, exit_in_tokyo):
+async def test_socks4_credentials_are_reported_as_a_launch_failure(client, exit_in_tokyo):
     checked = await client.post(
         "/api/proxy/check",
         json={
             "proxy_config": {
-                "type": "socks5",
+                "type": "socks4",
                 "server": "h:1080",
                 "username": "u",
                 "password": "p",

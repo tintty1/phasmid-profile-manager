@@ -1,4 +1,4 @@
-"""Data models for the Camoufox profile management system."""
+"""Data models for the Phasmid profile manager."""
 
 import re
 import secrets
@@ -7,7 +7,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 # Characters used for short IDs, excluding visually confusing ones (0, o, 1, l, i).
 _ID_ALPHABET = "".join(c for c in (string.ascii_lowercase + string.digits) if c not in "0o1li")
@@ -62,13 +62,16 @@ class ProxyType(str, Enum):
     SOCKS5 = "socks5"
 
 
-class WebRTCMode(str, Enum):
-    """WebRTC IP spoofing mode."""
+WebRTCPolicy = Literal[
+    "default",
+    "default_public_interface_only",
+    "default_public_and_private_interfaces",
+    "disable_non_proxied_udp",
+]
 
-    FORWARD = "forward"  # Forward the real IP
-    REPLACE = "replace"  # Replace with the proxy IP
-    REAL = "real"  # Use the real IP
-    NONE = "none"  # Disable WebRTC
+OsFamily = Literal["linux", "windows"]
+
+_GPU_KEY = re.compile(r"^0x[0-9a-f]{4}:0x[0-9a-f]{4}$")
 
 
 class ProxyConfig(BaseModel):
@@ -80,112 +83,75 @@ class ProxyConfig(BaseModel):
     password: str | None = None
     country: str | None = None
 
-    def to_camoufox_format(self) -> dict[str, str]:
-        """Convert to the proxy dict Camoufox/Playwright expects."""
-        config = {"server": f"{self.type.value}://{self.server}"}
-        if self.username:
-            config["username"] = self.username
-        if self.password:
-            config["password"] = self.password
-        return config
-
 
 class BrowserSettings(BaseModel):
-    """Browser fingerprint and behaviour settings.
+    """What a person chooses about a profile's machine; Phasmid's genprofile does the rest.
 
-    High-level fields (os, screen, languages, fonts) are handed to Camoufox,
-    which generates a consistent fingerprint. Only explicit overrides that
-    Camoufox cannot derive on its own are emitted via :meth:`to_camoufox_config`.
+    The machine itself (``Profile.fingerprint``) is a full Phasmid profile,
+    generated from these settings once and replayed on every launch. ``os`` and
+    ``gpu`` pick the hardware and only take effect when a machine is generated.
+    ``languages`` and ``timezone`` are the location group: unset, both follow
+    the proxy's exit address, which is the right answer for nearly every
+    profile; set, they win over it on the next launch.
     """
 
-    # Browser chrome only; fingerprint and privacy settings remain independent.
-    browser_ui: Literal["desktop", "camoufox"] = "desktop"
-
-    # Base settings
-    os: str = "windows"  # windows, linux, macos
-    screen: str = "1920x1080"
-    user_agent: str | None = None
-    languages: list[str] = ["en-US", "en"]
+    os: OsFamily = "linux"
+    # "<vendor_id>:<device_id>" of a GPU a captured host backs, e.g. 0x10de:0x2504;
+    # GET /api/v1/fingerprints/gpus lists them. Unset: drawn from the captures.
+    gpu: str | None = None
+    languages: list[str] | None = None
     timezone: str | None = None
-    locale: str | None = None
+    # Chrome's WebRTC IP handling policy. "default" is what stock Chrome does;
+    # mDNS already hides host candidates there.
+    webrtc_policy: WebRTCPolicy = "default"
 
-    # Browser window size
-    window_width: int | None = 1280
-    window_height: int | None = 720
+    @field_validator("gpu")
+    @classmethod
+    def _gpu_key(cls, value: str | None) -> str | None:
+        if value is None or value == "":
+            return None
+        value = value.strip().lower()
+        if not _GPU_KEY.match(value):
+            raise ValueError("gpu is <vendor_id>:<device_id>, e.g. 0x10de:0x2504")
+        return value
 
-    # Geolocation
-    geolocation: dict[str, float] | None = None
+    @field_validator("languages")
+    @classmethod
+    def _languages(cls, value: list[str] | None) -> list[str] | None:
+        if value is None:
+            return None
+        cleaned = [lang.strip() for lang in value if lang and lang.strip()]
+        return cleaned or None
 
-    # WebRTC
-    webrtc_mode: WebRTCMode = WebRTCMode.REPLACE
-    webrtc_public_ip: str | None = None
-    webrtc_local_ips: list[str] | None = None
+    @field_validator("timezone")
+    @classmethod
+    def _timezone(cls, value: str | None) -> str | None:
+        if value is None or not value.strip():
+            return None
+        from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-    # Device characteristics
-    hardware_concurrency: int | None = None
-    device_memory: int | None = None
-    max_touch_points: int = 0
-
-    # Fingerprint noise preferences. Camoufox applies canvas/WebGL/audio spoofing
-    # itself; these flags are stored intent and are not forwarded as config keys.
-    canvas_noise: bool = True
-    webgl_noise: bool = True
-    audio_noise: bool = True
-
-    # Make the canvas reproducible across launches instead of randomised per
-    # session. Off by default: it trades cross-site unlinkability for a canvas
-    # that behaves like real hardware. See to_camoufox_launch_options().
-    stable_canvas: bool = False
-
-    # Fonts
-    fonts: list[str] | None = None
+        value = value.strip()
+        try:
+            ZoneInfo(value)
+        except (ZoneInfoNotFoundError, ValueError) as exc:
+            raise ValueError(f"Unknown timezone {value!r}") from exc
+        return value
 
     def has_geography(self) -> bool:
         """Whether this profile states where it is instead of following its proxy."""
-        return bool(self.timezone or self.geolocation)
+        return bool(self.timezone)
 
     def clear_geography(self) -> bool:
-        """Drop the stated location so the proxy's exit address supplies it again.
+        """Drop the stated timezone so the proxy's exit address supplies it again.
 
-        Only the two fields Camoufox derives from that address. Languages and
-        locale are left alone: they are not geography — Camoufox applies them
-        after its IP lookup regardless, and an English browser is unremarkable
-        from any country — so clearing them would change the profile's identity
-        rather than free it to follow the proxy.
+        Languages are left alone: an English browser is unremarkable from any
+        country, so clearing them would change the profile's identity rather
+        than free it to follow the proxy.
         """
         if not self.has_geography():
             return False
         self.timezone = None
-        self.geolocation = None
         return True
-
-    def to_camoufox_config(self) -> dict[str, Any]:
-        """Build Camoufox ``config`` property overrides.
-
-        Only values Camoufox does not derive itself are included; the browser's
-        own generator owns user-agent, WebGL, canvas and audio to keep the
-        fingerprint internally consistent.
-        """
-        config: dict[str, Any] = {"disableTheming": self.browser_ui == "desktop"}
-        if self.browser_ui == "desktop":
-            config["showcursor"] = False
-        if self.geolocation:
-            config["geolocation:latitude"] = self.geolocation["lat"]
-            config["geolocation:longitude"] = self.geolocation["lon"]
-            if "accuracy" in self.geolocation:
-                config["geolocation:accuracy"] = self.geolocation["accuracy"]
-        if self.timezone:
-            config["timezone"] = self.timezone
-        if self.hardware_concurrency:
-            config["navigator.hardwareConcurrency"] = self.hardware_concurrency
-        if self.max_touch_points:
-            config["navigator.maxTouchPoints"] = self.max_touch_points
-        # webrtc_local_ips is intentionally not emitted. The webrtc:localipv4 key
-        # does exist, but setting it replaces the mDNS candidate a real Firefox
-        # sends with a literal address. Leaving it alone keeps the real behaviour.
-        if self.webrtc_public_ip:
-            config["webrtc:ipv4"] = self.webrtc_public_ip
-        return config
 
 
 # What a finding means, defined here because both the live check and the record
@@ -245,9 +211,9 @@ class Profile(BaseModel):
     # deliberately unprotected. Edits and launches are unaffected.
     protected: bool = False
 
-    # The machine this profile pretends to be, resolved once on first launch and
-    # replayed from then on so the profile does not look like new hardware every
-    # session. See core/fingerprint_store.py for what is frozen and what is not.
+    # The machine this profile is: a full Phasmid profile JSON, generated once
+    # and replayed on every launch so the profile does not look like new
+    # hardware every session. See core/machine.py for what follows the proxy.
     fingerprint: dict[str, Any] | None = None
 
     # The last time this profile's proxy was checked, so the list can show it
@@ -267,49 +233,6 @@ class Profile(BaseModel):
         if not self.storage_path:
             self.storage_path = f"{base_path}/profile_{self.id}"
         return self.storage_path
-
-    def to_camoufox_launch_options(self) -> dict[str, Any]:
-        """Build the keyword arguments passed to ``AsyncCamoufox``.
-
-        Passes high-level constraints and lets Camoufox generate the fingerprint;
-        does not inject a manual user-agent or WebGL renderer.
-        """
-        bs = self.browser_settings
-        options: dict[str, Any] = {
-            "os": bs.os,
-            "locale": ",".join(bs.languages) if bs.languages else "en-US",
-            "config": bs.to_camoufox_config(),
-            "user_data_dir": self.get_storage_path(),
-            "persistent_context": True,
-            "humanize": True,
-            "i_know_what_im_doing": True,
-            # Let Camoufox derive geo/timezone from the proxy IP unless we set coordinates.
-            "geoip": not bool(bs.geolocation),
-        }
-        # "none" fully disables WebRTC; other modes use Camoufox's default handling
-        # (which reports the proxy's public IP when a proxy is set).
-        if bs.webrtc_mode == WebRTCMode.NONE:
-            options["block_webrtc"] = True
-        if bs.stable_canvas:
-            # Firefox's baseline fingerprinting protection randomises canvas image
-            # export (toDataURL/toBlob, 2D and WebGL) per site and per session.
-            # Turning it off makes the canvas reproducible, which is what a
-            # long-lived profile needs — together with the pinned fonts:spacing_seed,
-            # since text rendering follows that seed rather than the canvas path.
-            #
-            # The cost is deliberate: the canvas is then identical across sites,
-            # exactly as real hardware behaves, so it can be correlated between
-            # them. That is why this is per profile and off by default.
-            options["firefox_user_prefs"] = {
-                "privacy.baselineFingerprintingProtection": False,
-            }
-        if bs.window_width and bs.window_height:
-            options["window"] = (bs.window_width, bs.window_height)
-        if bs.fonts:
-            options["fonts"] = bs.fonts
-        if self.proxy:
-            options["proxy"] = self.proxy.to_camoufox_format()
-        return options
 
 
 class ProfileGroup(BaseModel):
@@ -367,12 +290,12 @@ class ScheduleAction(str, Enum):
     swapping its GPU, screen and cores on a timer would hand a warmed-up
     account new hardware overnight — the one thing the pin prevents. Hardware
     regeneration stays a manual action (reset-fingerprint), which warns about
-    the cost. REFRESH_BROWSER is the honest scheduled rotation: it moves only
-    the browser version, which is what a real machine does when it updates.
+    the cost. Nor is there a browser-version refresh: Phasmid reports the
+    version it was built from, so a profile's browser is updated by installing
+    a newer release, for every profile at once, as on a real machine.
     """
 
     LAUNCH = "launch"
-    REFRESH_BROWSER = "refresh_browser"
 
 
 class ScheduleKind(str, Enum):
@@ -433,8 +356,6 @@ class Schedule(BaseModel):
             if any(day < 0 or day > 6 for day in self.days):
                 raise ValueError("days entries are weekdays, 0 (Monday) to 6 (Sunday)")
             self.days = sorted(set(self.days)) or None
-        if self.action == ScheduleAction.REFRESH_BROWSER and self.run_minutes:
-            raise ValueError("run_minutes only applies to launch schedules")
         return self
 
 

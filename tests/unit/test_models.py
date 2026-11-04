@@ -1,6 +1,8 @@
 """Tests for core data models."""
 
-from phasmid_pm.core.models import ProxyConfig, ProxyType, generate_short_id
+import pytest
+
+from phasmid_pm.core.models import BrowserSettings, generate_short_id
 
 
 def test_short_id_shape_and_uniqueness():
@@ -11,12 +13,23 @@ def test_short_id_shape_and_uniqueness():
         assert not (set(value) & set("0o1li"))  # no confusing characters
 
 
-def test_proxy_to_camoufox_format():
-    proxy = ProxyConfig(type=ProxyType.SOCKS5, server="1.2.3.4:1080", username="u", password="p")
-    result = proxy.to_camoufox_format()
-    assert result == {"server": "socks5://1.2.3.4:1080", "username": "u", "password": "p"}
+def test_a_gpu_is_normalised_and_checked():
+    assert BrowserSettings(gpu=" 0x10DE:0x2504 ").gpu == "0x10de:0x2504"
+    assert BrowserSettings(gpu="").gpu is None
+    with pytest.raises(ValueError, match="vendor_id"):
+        BrowserSettings(gpu="RTX 3060")
 
 
-def test_proxy_without_credentials_omits_them():
-    proxy = ProxyConfig(type=ProxyType.HTTP, server="1.2.3.4:8080")
-    assert proxy.to_camoufox_format() == {"server": "http://1.2.3.4:8080"}
+def test_blank_languages_follow_the_proxy():
+    assert BrowserSettings(languages=["", " "]).languages is None
+    assert BrowserSettings(languages=[" de-DE", "de"]).languages == ["de-DE", "de"]
+
+
+def test_only_the_oses_phasmid_can_claim_are_accepted():
+    with pytest.raises(ValueError):
+        BrowserSettings(os="macos")
+
+
+def test_settings_from_an_older_version_still_load():
+    """Unknown keys are ignored rather than refusing the stored row."""
+    assert BrowserSettings(**{"os": "linux", "screen": "1920x1080"}).os == "linux"

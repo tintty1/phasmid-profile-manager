@@ -12,7 +12,7 @@ from phasmid_pm.main import app
 
 
 @pytest.fixture
-async def client(tmp_path, monkeypatch):
+async def client(tmp_path, phasmid):
     """An HTTP client wired to the app with a throwaway database."""
     storage = StorageManager(str(tmp_path / "api.db"))
     await storage.initialize()
@@ -21,7 +21,6 @@ async def client(tmp_path, monkeypatch):
 
     dependencies.set_storage_manager(storage)
     dependencies.set_profile_manager(manager)
-    monkeypatch.setattr("phasmid_pm.core.browser_install.ensure_browser_ready", lambda: None)
     from phasmid_pm.api.routes.recovery import set_backup_manager
     from phasmid_pm.core.backups import ProfileBackupManager
 
@@ -34,5 +33,6 @@ async def client(tmp_path, monkeypatch):
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as http_client:
         yield http_client
 
+    await manager.browser_sessions.close_all()
     await storage.close()
     set_backup_manager(None)

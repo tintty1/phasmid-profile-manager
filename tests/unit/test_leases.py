@@ -11,7 +11,6 @@ import asyncio
 import pytest
 
 from phasmid_pm.config import Settings
-from phasmid_pm.core import profile_manager as pm_module
 from phasmid_pm.core.database import StorageManager
 from phasmid_pm.core.leases import ProfileLocked, lease_expired, make_lease_holder
 from phasmid_pm.core.models import BrowserSettings, Profile
@@ -181,7 +180,6 @@ def launches(profile_manager, monkeypatch):
     class FakeSession:
         process_id = 4242
         mode = "window"
-        playwright_endpoint = None
 
         async def terminate(self):
             pass
@@ -192,7 +190,6 @@ def launches(profile_manager, monkeypatch):
         return FakeSession()
 
     monkeypatch.setattr(profile_manager.browser_sessions, "launch", fake_launch)
-    monkeypatch.setattr(pm_module.fingerprint_store, "resolve", lambda *_a, **_kw: {})
     return recorded
 
 

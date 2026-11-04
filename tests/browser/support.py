@@ -1,4 +1,4 @@
-"""Shared machinery for the browser tests: two local origins, and offline launches.
+"""Shared machinery for the browser tests: two local origins.
 
 Kept out of conftest.py because these are imported by name; a conftest can be
 loaded more than once depending on the rootdir, and importing one directly is a
@@ -12,39 +12,9 @@ import socketserver
 import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Any, NamedTuple
-
-# In the MaxMind database Camoufox ships, which not every address is — 1.1.1.1
-# is not.
-GEOIP_ADDRESS = "8.8.8.8"
+from typing import NamedTuple
 
 PAGE = b"<!doctype html><meta charset=utf-8><title>test page</title><p>test page"
-
-
-def offline_launch(options: dict[str, Any]) -> dict[str, Any]:
-    """These launch options with the one thing that reaches the internet replaced.
-
-    A real launch passes `geoip=True`, and Camoufox then asks the internet what
-    this machine's public address is. The answer is cached per process, so it is
-    one lookup per run rather than one per launch — but a *failed* lookup is not
-    cached, so with no internet every launch retries and fails, and the answer
-    differs by machine anyway.
-
-    Naming an address keeps the whole path. Camoufox gates only the HTTP lookup
-    on `geoip is True`; everything after it — geolocation, timezone, locale, the
-    WebRTC candidate and the IPv6 pref that goes with it — runs the same either
-    way, against the database on disk. `geoip=False` would take a different
-    branch and change what the browser does, which is why it is not used here.
-
-    Left alone when a test set geoip itself; profiles with coordinates turn it
-    off, and that is the behaviour under test. Note it also short-circuits the
-    lookup Camoufox makes *through a proxy* — no browser test launches with one
-    today, and one that did would want its own answer here.
-    """
-    launch = dict(options)
-    if launch.get("geoip") is True:
-        launch["geoip"] = GEOIP_ADDRESS
-    return launch
 
 
 class _Handler(http.server.BaseHTTPRequestHandler):
@@ -114,11 +84,9 @@ def serve_local_sites() -> Iterator[LocalSites]:
             server.server_close()
 
 
-# What the page itself computes, written where automation can read it back.
-# Automation must not evaluate this directly: since 152.0.4-beta.29 Camoufox runs
-# `page.evaluate` in an isolated world, and a timezone override belongs to the
-# realm that received it. The page's realm is the one a site actually gets, so
-# that is the only observer worth asserting on.
+# What the page itself computes, written where automation can read it back. A
+# script of the page's own runs in the realm a site actually gets, which is the
+# only observer worth asserting on.
 _TIMEZONE_PROBE = (
     "<script>document.title = Intl.DateTimeFormat().resolvedOptions().timeZone</script>"
 )

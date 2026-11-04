@@ -81,7 +81,7 @@ def test_a_foreign_zip_is_refused(tmp_path):
     with zipfile.ZipFile(stranger, "w") as archive:
         archive.writestr("hello.txt", "not a profile")
 
-    with pytest.raises(ValueError, match="Not a Camoufox profile archive"):
+    with pytest.raises(ValueError, match="Not a Phasmid profile archive"):
         profile_archive.read_archive(stranger)
 
 

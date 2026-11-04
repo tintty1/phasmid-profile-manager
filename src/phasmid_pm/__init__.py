@@ -1,4 +1,4 @@
-"""Phasmid Profile Manager — antidetect browser profile management on Camoufox."""
+"""Phasmid Profile Manager — antidetect browser profile management on Phasmid."""
 
 from importlib.metadata import PackageNotFoundError, version
 
@@ -11,4 +11,4 @@ try:
 except PackageNotFoundError:  # pragma: no cover - only when running from a source tree
     __version__ = "0.0.0+unknown"
 
-__description__ = "Self-hosted, open-source antidetect browser profile manager built on Camoufox"
+__description__ = "Self-hosted, open-source antidetect browser profile manager built on Phasmid"

@@ -4,22 +4,19 @@ CRUD over the API is covered in tests/integration; these are the parts of the
 manager that touch the filesystem or a profile's identity.
 """
 
+import json
+import os
 import shutil
+import stat
 from pathlib import Path
 
 import pytest
 
-from phasmid_pm.core import fingerprint_store
-from phasmid_pm.core import profile_manager as pm_module
+from phasmid_pm.core.browser_session import BrowserLaunchError
+from phasmid_pm.core.leases import ProfileLocked
+from tests.fakes import fake_pin
 
-PINNED = {
-    "navigator.userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0",
-    "navigator.platform": "Win32",
-    "navigator.hardwareConcurrency": 12,
-    "screen.width": 2560,
-    "screen.height": 1440,
-    "webGl:renderer": "NVIDIA GeForce RTX 3070",
-}
+PINNED = fake_pin("windows", seed="77" * 16, public_ip="203.0.113.10")
 
 
 async def pin(profile_manager, profile):
@@ -63,7 +60,8 @@ async def test_a_clone_is_a_different_machine(profile_manager):
     clone = await profile_manager.clone_profile(source.id, "copy")
 
     assert clone is not None
-    assert clone.fingerprint is None
+    assert clone.fingerprint is not None
+    assert clone.fingerprint["seed"] != PINNED["seed"]
     assert (await profile_manager.get_profile(source.id)).fingerprint == PINNED
 
 
@@ -171,121 +169,227 @@ async def test_bulk_update_counts_only_the_profiles_that_exist(profile_manager):
 
 
 # -- Launching ------------------------------------------------------------------
+#
+# Real launches of the fake browser binary from the phasmid fixture: the command
+# line, the session files and the location move are the production code paths.
 
 
-@pytest.fixture
-def launches(profile_manager, monkeypatch):
-    """Capture the launch options without starting a browser.
+def launched(profile_manager, profile_id: str) -> dict:
+    """What the fake browser saw: its argv and environment."""
+    storage = Path(profile_manager.profiles_dir) / f"profile_{profile_id}"
+    return json.loads((storage / "argv.json").read_text())
 
-    Fingerprint resolution is stubbed out too: it reads the installed browser,
-    which CI does not have and which would make these depend on the machine.
-    """
-    recorded: list[dict] = []
 
-    class FakeSession:
-        process_id = 4242
-        mode = "window"
-        playwright_endpoint = None
-
-    async def fake_launch(profile_id, options, on_exit=None, mode=None):
-        recorded.append(options)
-        profile_manager.browser_sessions.active_sessions[profile_id] = FakeSession()
-        return FakeSession()
-
-    monkeypatch.setattr(profile_manager.browser_sessions, "launch", fake_launch)
-    monkeypatch.setattr(pm_module.fingerprint_store, "resolve", lambda *_args, **_kw: {})
-    return recorded
+def switch(argv: list[str], name: str) -> str | None:
+    return next((a.split("=", 1)[1] for a in argv if a.startswith(f"{name}=")), None)
 
 
 @pytest.mark.asyncio
-async def test_launching_an_unknown_profile_says_so(profile_manager, launches):
+async def test_launching_an_unknown_profile_says_so(profile_manager):
     with pytest.raises(ValueError, match="not found"):
         await profile_manager.launch_browser("nope")
 
 
 @pytest.mark.asyncio
-async def test_a_window_size_is_passed_as_the_pair_camoufox_expects(profile_manager, launches):
-    profile = await profile_manager.create_profile(name="p")
+async def test_a_launch_hands_the_browser_its_machine(profile_manager, phasmid):
+    profile = await profile_manager.create_profile(
+        name="p", browser_settings={"webrtc_policy": "disable_non_proxied_udp"}
+    )
 
-    await profile_manager.launch_browser(profile.id, window_size="1600x900")
-
-    assert launches[0]["window"] == (1600, 900)
-
-
-@pytest.mark.asyncio
-async def test_an_unreadable_window_size_is_ignored_rather_than_failing_the_launch(
-    profile_manager, launches
-):
-    """Losing the requested size is a nuisance; refusing to open the browser is not."""
-    profile = await profile_manager.create_profile(name="p", browser_settings={"os": "windows"})
-
-    result = await profile_manager.launch_browser(profile.id, window_size="huge")
+    result = await profile_manager.launch_browser(profile.id, mode="headless")
 
     assert result["status"] == "launched"
-    assert launches[0]["window"] == (
-        profile.browser_settings.window_width,
-        profile.browser_settings.window_height,
+    argv = launched(profile_manager, profile.id)["argv"]
+    assert argv[0] == str(phasmid.installation.binary)
+    assert switch(argv, "--user-data-dir") == str(
+        Path(profile_manager.profiles_dir) / f"profile_{profile.id}"
     )
+    assert "--remote-debugging-port=0" in argv
+    assert "--password-store=basic" in argv
+    assert "--headless" in argv
+    handed = Path(switch(argv, "--phasmid-profile"))
+    assert stat.S_IMODE(handed.stat().st_mode) == 0o600
+    sent = json.loads(handed.read_text())
+    stored = (await profile_manager.get_profile(profile.id)).fingerprint
+    assert sent["seed"] == stored["seed"]
+    assert sent["network"]["webrtc"]["ip_handling_policy"] == "disable_non_proxied_udp"
 
 
 @pytest.mark.asyncio
-async def test_a_second_launch_does_not_open_a_second_browser(profile_manager, launches):
+async def test_the_first_launch_places_the_machine_at_the_exit(profile_manager, phasmid):
+    phasmid.installed = False
     profile = await profile_manager.create_profile(name="p")
+    assert profile.fingerprint is None
+    phasmid.installed = True
+    phasmid.exit_ip = "203.0.113.10"
 
-    await profile_manager.launch_browser(profile.id)
-    again = await profile_manager.launch_browser(profile.id)
-
-    assert again["status"] == "already_running"
-    assert len(launches) == 1
-
-
-@pytest.mark.asyncio
-async def test_a_pinned_machine_is_replayed_on_every_launch(profile_manager, launches):
-    profile = await pin(profile_manager, await profile_manager.create_profile(name="p"))
-
-    await profile_manager.launch_browser(profile.id)
-
-    assert launches[0]["config"]["webGl:renderer"] == PINNED["webGl:renderer"]
-    assert launches[0]["config"]["screen.width"] == 2560
-
-
-@pytest.mark.asyncio
-async def test_the_profiles_own_settings_still_beat_the_pin(profile_manager, launches, monkeypatch):
-    """A pin is the hardware; timezone and geolocation follow the proxy, and the
-    profile's explicit values have to survive the merge."""
-    profile = await profile_manager.create_profile(
-        name="p", browser_settings={"timezone": "Asia/Tokyo", "hardware_concurrency": 4}
-    )
-    await pin(profile_manager, profile)
-    monkeypatch.setattr(
-        pm_module.fingerprint_store,
-        "resolve",
-        lambda *_a, **_k: {"navigator.hardwareConcurrency": 12},
-    )
-
-    await profile_manager.launch_browser(profile.id)
-
-    assert launches[0]["config"]["timezone"] == "Asia/Tokyo"
-    assert launches[0]["config"]["navigator.hardwareConcurrency"] == 4
-
-
-@pytest.mark.asyncio
-async def test_the_first_launch_pins_the_machine_it_resolved(profile_manager, monkeypatch):
-    resolved = {"navigator.platform": "Win32", "screen.width": 1920}
-
-    async def fake_launch(profile_id, options, on_exit=None, mode=None):
-        profile_manager.browser_sessions.active_sessions[profile_id] = object()
-        return type("S", (), {"process_id": None, "mode": "window", "playwright_endpoint": None})()
-
-    monkeypatch.setattr(profile_manager.browser_sessions, "launch", fake_launch)
-    monkeypatch.setattr(pm_module.fingerprint_store, "resolve", lambda *_a, **_k: resolved)
-    profile = await profile_manager.create_profile(name="p")
-
-    await profile_manager.launch_browser(profile.id)
+    result = await profile_manager.launch_browser(profile.id, mode="headless")
 
     stored = await profile_manager.get_profile(profile.id)
-    assert stored.fingerprint == resolved
+    assert result["launch"]["exit_ip"] == "203.0.113.10"
+    assert stored.fingerprint["network"]["webrtc"]["public_ip"] == "203.0.113.10"
+    assert stored.fingerprint["locale"]["timezone"] == "Europe/Berlin"
+    assert stored.fingerprint["locale"]["languages"][0] == "de-DE"
     assert stored.last_used is not None
+
+
+@pytest.mark.asyncio
+async def test_a_new_exit_moves_the_machine_and_keeps_its_hardware(profile_manager, phasmid):
+    profile = await profile_manager.create_profile(name="p")
+    phasmid.exit_ip = "203.0.113.10"
+    await profile_manager.launch_browser(profile.id, mode="headless")
+    await profile_manager.close_browser(profile.id)
+    berlin = (await profile_manager.get_profile(profile.id)).fingerprint
+
+    phasmid.exit_ip = "203.0.113.20"
+    result = await profile_manager.launch_browser(profile.id, mode="headless")
+
+    tokyo = (await profile_manager.get_profile(profile.id)).fingerprint
+    assert result["launch"]["moved"] is True
+    assert tokyo["locale"]["timezone"] == "Asia/Tokyo"
+    assert tokyo["network"]["webrtc"]["public_ip"] == "203.0.113.20"
+    for section in ("seed", "os", "hardware", "display", "gpu", "fonts"):
+        assert tokyo[section] == berlin[section], f"{section} must not change with the exit"
+    # The move regenerates from the pin's own seed, OS and GPU.
+    request = phasmid.genprofile.generated()[-1]
+    assert (request["seed"], request["os"]) == (berlin["seed"], berlin["os"]["family"])
+    assert request["gpu"] == f"{berlin['gpu']['vendor_id']}:{berlin['gpu']['device_id']}"
+
+
+@pytest.mark.asyncio
+async def test_the_same_exit_does_not_touch_the_machine(profile_manager, phasmid):
+    profile = await profile_manager.create_profile(name="p")
+    await profile_manager.launch_browser(profile.id, mode="headless")
+    await profile_manager.close_browser(profile.id)
+    generated = len(phasmid.genprofile.generated())
+
+    result = await profile_manager.launch_browser(profile.id, mode="headless")
+
+    assert result["launch"]["moved"] is False
+    assert len(phasmid.genprofile.generated()) == generated
+
+
+@pytest.mark.asyncio
+async def test_a_stated_timezone_wins_and_keeps_the_exit_address(profile_manager, phasmid):
+    """WebRTC's UDP bypasses the proxy, so the address must stay the exit's."""
+    profile = await profile_manager.create_profile(
+        name="p", browser_settings={"timezone": "Asia/Tokyo", "languages": ["ja", "en"]}
+    )
+    phasmid.exit_ip = "203.0.113.10"
+
+    await profile_manager.launch_browser(profile.id, mode="headless")
+
+    pin = (await profile_manager.get_profile(profile.id)).fingerprint
+    assert pin["locale"]["timezone"] == "Asia/Tokyo"
+    assert pin["locale"]["languages"] == ["ja", "en"]
+    assert pin["network"]["webrtc"]["public_ip"] == "203.0.113.10"
+
+
+@pytest.mark.asyncio
+async def test_an_unreachable_proxy_starts_nothing_and_frees_the_profile(profile_manager, phasmid):
+    profile = await profile_manager.create_profile(
+        name="p", proxy_config={"type": "http", "server": "127.0.0.1:9"}
+    )
+    phasmid.exit_ip = None
+
+    with pytest.raises(BrowserLaunchError, match="proxy did not answer"):
+        await profile_manager.launch_browser(profile.id, mode="headless")
+
+    assert not profile_manager.browser_sessions.is_running(profile.id)
+    assert await profile_manager.storage.get_lease(profile.id) == (None, None)
+
+
+@pytest.mark.asyncio
+async def test_without_a_proxy_an_offline_launch_keeps_the_machine_where_it_was(
+    profile_manager, phasmid
+):
+    profile = await profile_manager.create_profile(name="p")
+    before = profile.fingerprint
+    phasmid.exit_ip = None
+
+    result = await profile_manager.launch_browser(profile.id, mode="headless")
+
+    assert result["status"] == "launched"
+    assert (await profile_manager.get_profile(profile.id)).fingerprint == before
+
+
+@pytest.mark.asyncio
+async def test_a_proxy_goes_through_proxyroute_with_its_credentials_in_a_private_file(
+    profile_manager, phasmid
+):
+    proxyroute = phasmid.installation.proxyroute
+    proxyroute.parent.mkdir(parents=True)
+    # A stand-in for proxyroute: run the command after "--", as it does.
+    proxyroute.write_text(
+        "import os, sys\ni = sys.argv.index('--')\nos.execv(sys.argv[i + 1], sys.argv[i + 1:])\n"
+    )
+    profile = await profile_manager.create_profile(
+        name="p",
+        proxy_config={
+            "type": "socks5",
+            "server": "proxy.example:1080",
+            "username": "alice",
+            "password": "p@ss:word",
+        },
+    )
+
+    result = await profile_manager.launch_browser(profile.id, mode="headless")
+
+    argv = result["launch"]["argv"]
+    assert argv[1] == str(proxyroute)
+    assert not any("p@ss" in arg or "p%40ss" in arg for arg in argv), "never on the command line"
+    session = profile_manager.browser_sessions.active_sessions[profile.id]
+    args_file = session.run_dir / "proxy-args"
+    assert stat.S_IMODE(os.stat(args_file).st_mode) == 0o600
+    assert (
+        args_file.read_text() == "--proxy-default=socks5://alice:p%40ss%3Aword@proxy.example:1080\n"
+    )
+
+    await profile_manager.close_browser(profile.id)
+    assert not args_file.exists(), "credentials go with the session"
+
+
+@pytest.mark.asyncio
+async def test_socks4_goes_to_chrome_directly(profile_manager):
+    profile = await profile_manager.create_profile(
+        name="p", proxy_config={"type": "socks4", "server": "proxy.example:1080"}
+    )
+
+    await profile_manager.launch_browser(profile.id, mode="headless")
+
+    argv = launched(profile_manager, profile.id)["argv"]
+    assert "--proxy-server=socks4://proxy.example:1080" in argv
+
+
+@pytest.mark.asyncio
+async def test_extra_switches_are_appended(profile_manager):
+    profile = await profile_manager.create_profile(name="p")
+
+    await profile_manager.launch_browser(profile.id, mode="headless", extra_args=["--lang=de"])
+
+    assert "--lang=de" in launched(profile_manager, profile.id)["argv"]
+
+
+@pytest.mark.asyncio
+async def test_a_second_launch_does_not_open_a_second_browser(profile_manager):
+    profile = await profile_manager.create_profile(name="p")
+
+    first = await profile_manager.launch_browser(profile.id, mode="headless")
+    again = await profile_manager.launch_browser(profile.id, mode="headless")
+
+    assert again["status"] == "already_running"
+    assert again["process_id"] == first["process_id"]
+
+
+@pytest.mark.asyncio
+async def test_a_browser_failing_to_start_frees_the_profile(profile_manager, monkeypatch):
+    monkeypatch.setenv("FAKE_CHROME", "crash")
+    profile = await profile_manager.create_profile(name="p")
+
+    with pytest.raises(BrowserLaunchError, match="profile refused"):
+        await profile_manager.launch_browser(profile.id, mode="headless")
+
+    assert await profile_manager.storage.get_lease(profile.id) == (None, None)
 
 
 @pytest.mark.asyncio
@@ -296,40 +400,61 @@ async def test_closing_a_browser_that_is_not_running_says_so(profile_manager):
 
 
 @pytest.mark.asyncio
-async def test_rotating_the_fingerprint_drops_the_pinned_machine(profile_manager):
+async def test_regenerating_gives_a_new_seed(profile_manager):
     profile = await pin(profile_manager, await profile_manager.create_profile(name="p"))
+
+    rotated = await profile_manager.rotate_profile_fingerprint(profile.id)
+
+    assert rotated is not None and rotated.fingerprint["seed"] != PINNED["seed"]
+
+
+@pytest.mark.asyncio
+async def test_regenerating_without_the_browser_leaves_it_to_the_first_launch(
+    profile_manager, phasmid
+):
+    profile = await pin(profile_manager, await profile_manager.create_profile(name="p"))
+    phasmid.installed = False
 
     rotated = await profile_manager.rotate_profile_fingerprint(profile.id)
 
     assert rotated is not None and rotated.fingerprint is None
 
 
+# -- Orphans --------------------------------------------------------------------
+
+
 @pytest.mark.asyncio
-async def test_refreshing_a_browser_version_without_a_pin_says_to_launch_first(profile_manager):
+async def test_a_browser_left_by_a_dead_instance_is_closed_at_startup(profile_manager):
     profile = await profile_manager.create_profile(name="p")
+    await profile_manager.launch_browser(profile.id, mode="headless")
+    session = profile_manager.browser_sessions.active_sessions.pop(profile.id)
+    session.monitor_task.cancel()
+    # As if the holder had died: a pid on this host that no longer exists.
+    dead = "{}:999999999:x".format(__import__("socket").gethostname())
+    profile_manager.storage.db._connection.execute(
+        "UPDATE profiles SET locked_by = ? WHERE id = ?", (dead, profile.id)
+    )
 
-    with pytest.raises(ValueError, match="no pinned machine"):
-        await profile_manager.refresh_browser_version(profile.id)
+    assert await profile_manager.reap_orphans() == 1
+
+    assert await session.process.wait() is not None
+    assert not session.run_dir.exists()
+    assert await profile_manager.storage.get_lease(profile.id) == (None, None)
 
 
 @pytest.mark.asyncio
-async def test_refreshing_reads_the_operating_system_from_the_pin(profile_manager, monkeypatch):
-    """The OS dropdown can be changed after the machine was pinned; following it
-    would put a macOS user agent onto Windows hardware."""
-    profile = await profile_manager.create_profile(name="p", browser_settings={"os": "macos"})
-    await pin(profile_manager, profile)
-    asked: list[str] = []
-
-    def record(options, preset=None):
-        asked.append(options["os"])
-        return {"navigator.userAgent": "rv:141.0"}
-
-    monkeypatch.setattr(pm_module.fingerprint_store, "resolve", record)
-
-    await profile_manager.refresh_browser_version(profile.id)
-
-    assert asked == ["windows"]
-    assert (
-        fingerprint_store.browser_major((await profile_manager.get_profile(profile.id)).fingerprint)
-        == 141
+async def test_a_browser_another_live_instance_runs_is_left_alone(profile_manager):
+    profile = await profile_manager.create_profile(name="p")
+    await profile_manager.launch_browser(profile.id, mode="headless")
+    session = profile_manager.browser_sessions.active_sessions[profile.id]
+    # The parent of this test process stands in for another live instance.
+    other = "{}:{}:y".format(__import__("socket").gethostname(), os.getppid())
+    profile_manager.storage.db._connection.execute(
+        "UPDATE profiles SET locked_by = ? WHERE id = ?", (other, profile.id)
     )
+
+    assert await profile_manager.reap_orphans() == 0
+
+    assert session.process.returncode is None
+    with pytest.raises(ProfileLocked):
+        await profile_manager.launch_browser(profile.id, mode="headless")

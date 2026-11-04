@@ -16,16 +16,20 @@ class ProfileCreateRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=255, description="Profile name")
     group: str | None = Field(None, description="Profile group ID")
     browser_settings: dict[str, Any] | None = Field(
-        None, description="Browser settings (os, screen, languages, etc.)"
+        None,
+        description=(
+            "Machine settings: os (linux or windows), gpu (<vendor_id>:<device_id> from "
+            "GET /api/v1/fingerprints/gpus), languages and timezone (unset: from the "
+            "proxy's exit address), webrtc_policy"
+        ),
     )
     proxy_config: dict[str, Any] | None = Field(None, description="Proxy configuration")
     notes: str | None = Field(None, max_length=1000, description="Notes")
-    generate_fingerprint: bool = Field(True, description="Generate a fingerprint")
-    fingerprint_preset: str | None = Field(
-        None,
+    generate_fingerprint: bool = Field(
+        True,
         description=(
-            "Pin the profile to a captured real device, using an id from "
-            "GET /api/v1/fingerprints/presets. Omit to generate a fingerprint instead."
+            "Generate the machine now (when the browser is installed). Otherwise the "
+            "first launch generates it."
         ),
     )
     protected: bool = Field(
@@ -38,11 +42,7 @@ class ProfileCreateRequest(BaseModel):
             "example": {
                 "name": "Facebook Profile 1",
                 "group": "social_media_group_id",
-                "browser_settings": {
-                    "os": "windows",
-                    "screen": "1920x1080",
-                    "languages": ["en-US", "en"],
-                },
+                "browser_settings": {"os": "linux", "gpu": "0x10de:0x2504"},
                 "proxy_config": {
                     "type": "http",
                     "server": "proxy.example.com:8080",
@@ -79,62 +79,12 @@ class ProfileUpdateRequest(BaseModel):
         ),
     )
 
-    # The legacy flattened form of browser_settings. Kept for 0.1.x clients;
-    # removed in 1.0. Send the same keys inside browser_settings instead.
-    browser_os: str | None = Field(
-        None, description="Operating system (windows, macos, linux)", deprecated=True
-    )
-    browser_screen: str | None = Field(
-        None, description="Screen resolution (1920x1080)", deprecated=True
-    )
-    browser_user_agent: str | None = Field(None, description="User-Agent string", deprecated=True)
-    browser_languages: list[str] | None = Field(
-        None, description="Browser languages", deprecated=True
-    )
-    browser_timezone: str | None = Field(None, description="Timezone", deprecated=True)
-    browser_locale: str | None = Field(None, description="Locale (en_US, ru_RU)", deprecated=True)
-    browser_webrtc_mode: str | None = Field(
-        None, description="WebRTC mode (forward, replace, real, none)", deprecated=True
-    )
-    browser_canvas_noise: bool | None = Field(None, description="Canvas noise", deprecated=True)
-    browser_stable_canvas: bool | None = Field(
-        None,
-        description=(
-            "Keep the canvas reproducible across launches. Costs cross-site "
-            "unlinkability: the canvas becomes identical on every site."
-        ),
-        deprecated=True,
-    )
-    browser_webgl_noise: bool | None = Field(None, description="WebGL noise", deprecated=True)
-    browser_audio_noise: bool | None = Field(None, description="Audio noise", deprecated=True)
-    browser_hardware_concurrency: int | None = Field(
-        None, ge=1, le=32, description="CPU cores", deprecated=True
-    )
-    browser_device_memory: int | None = Field(
-        None, ge=1, le=128, description="Device memory (GB)", deprecated=True
-    )
-    browser_max_touch_points: int | None = Field(
-        None, ge=0, le=10, description="Max touch points", deprecated=True
-    )
-    browser_window_width: int | None = Field(
-        None, ge=800, le=3840, description="Browser window width", deprecated=True
-    )
-    browser_window_height: int | None = Field(
-        None, ge=600, le=2160, description="Browser window height", deprecated=True
-    )
-
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
                 "status": "inactive",
                 "notes": "Updated notes",
-                "browser_settings": {
-                    "os": "windows",
-                    "screen": "1920x1080",
-                    "webrtc_mode": "replace",
-                    "canvas_noise": True,
-                    "webgl_noise": True,
-                },
+                "browser_settings": {"timezone": "Europe/Berlin"},
             }
         }
     )
@@ -158,14 +108,15 @@ class ProfileResponse(BaseModel):
     protected: bool = Field(
         False, description="Deleting it or replacing its machine is refused until unprotected"
     )
-    # A short description of the pinned machine, not the stored config itself:
-    # that is ~40 properties and tens of kilobytes, which nothing here needs.
+    # A short description of the pinned machine, not the stored profile itself:
+    # that is hundreds of values and tens of kilobytes, which nothing here needs.
+    # GET /profiles/{id}/machine returns the whole Phasmid profile.
     fingerprint: dict[str, Any] | None = Field(
         None,
         description=(
-            "Summary of the pinned machine, null until the first launch. Its values "
-            "come from Camoufox and may gain keys as Camoufox changes; not frozen "
-            "by the API contract."
+            "Summary of the pinned machine, null until it is generated. Its values "
+            "come from the Phasmid profile and may gain keys as Phasmid's schema "
+            "grows; not frozen by the API contract."
         ),
     )
     proxy_check: ProxyCheckRecord | None = Field(
@@ -188,7 +139,7 @@ class ProfileResponse(BaseModel):
     @classmethod
     def from_profile(cls, profile: "Profile") -> "ProfileResponse":
         """Build the API view of a profile."""
-        from phasmid_pm.core import fingerprint_store
+        from phasmid_pm.core import machine
 
         return cls(
             id=profile.id,
@@ -206,7 +157,7 @@ class ProfileResponse(BaseModel):
             last_used=profile.last_used,
             deleted_at=profile.deleted_at,
             protected=profile.protected,
-            fingerprint=fingerprint_store.summarize(
+            fingerprint=machine.summarize(
                 profile.fingerprint,
                 profile.browser_settings.os if profile.browser_settings else None,
             ),
@@ -264,48 +215,41 @@ class ProfileLaunchRequest(BaseModel):
             "decides, and a headed launch uses virtual when PPM_VNC is on."
         ),
     )
-    window_size: str | None = Field(None, description="Window size (1920x1080)")
-    additional_options: dict[str, Any] | None = Field(
-        None, description="Additional Camoufox options"
+    window_size: str | None = Field(
+        None,
+        description="Ignored: the window is the profile's own size",
+        deprecated=True,
+    )
+    args: list[str] | None = Field(
+        None,
+        description=(
+            "Extra Chrome switches, appended to the command line, e.g. "
+            '["--lang=de"]. Anything a page can observe should come from the profile.'
+        ),
     )
 
-    model_config = ConfigDict(
-        json_schema_extra={
-            "example": {
-                "mode": "virtual",
-                "window_size": "1920x1080",
-                "additional_options": {"geoip": True, "humanize": True},
-            }
-        }
-    )
+    model_config = ConfigDict(json_schema_extra={"example": {"mode": "virtual"}})
 
 
 class ProfileLaunchResponse(BaseModel):
     """Response returned when a browser is launched."""
 
     profile_id: str
-    browser_session_id: str = Field(
-        ...,
-        description=(
-            "A random value that never identified anything; no endpoint accepts it. "
-            "Use profile_id to address the running browser."
-        ),
-        deprecated=True,
-    )
     status: str = Field(..., description="launched or already_running")
     message: str
     process_id: int | None = Field(None, description="OS process id of the browser, if known")
     mode: str | None = Field(None, description="headless, virtual or window")
-    playwright_endpoint: str | None = Field(
+    cdp_endpoint: str | None = Field(
         None,
         description=(
-            "WebSocket for Playwright: firefox.connect(playwright_endpoint). Send the "
-            "API key as an x-api-key header when one is set. close() only disconnects."
+            "CDP WebSocket of the browser: chromium.connect_over_cdp(cdp_endpoint) in "
+            "Playwright, puppeteer.connect({browserWSEndpoint}). Send the API key as an "
+            "x-api-key header when one is set."
         ),
     )
-    camoufox_options: dict[str, Any] = Field(
-        ...,
-        description="Launch internals passed to Camoufox; shape not covered by the API contract",
+    launch: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Launch internals (command line, exit address); not covered by the API contract",
     )
 
 
@@ -342,9 +286,7 @@ class ActiveBrowserInfo(BaseModel):
     started_at: datetime
     vnc: bool = Field(False, description="Viewable in the web UI over /profiles/{id}/vnc")
     mode: str | None = Field(None, description="headless, virtual or window")
-    playwright: bool = Field(
-        False, description="Drivable with Playwright over /profiles/{id}/playwright"
-    )
+    cdp: bool = Field(False, description="Drivable over CDP at /profiles/{id}/cdp")
 
 
 class ActiveBrowsersResponse(BaseModel):

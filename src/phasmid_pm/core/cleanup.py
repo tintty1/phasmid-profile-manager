@@ -185,7 +185,7 @@ class ProfileCleanupManager:
 
 
 async def main() -> None:
-    parser = argparse.ArgumentParser(description="Camoufox profile cleanup utility")
+    parser = argparse.ArgumentParser(description="Phasmid profile cleanup utility")
     parser.add_argument("--action", choices=["diagnostic", "cleanup", "auto"], default="diagnostic")
     parser.add_argument(
         "--dry-run", action="store_true", help="Report changes without applying them"

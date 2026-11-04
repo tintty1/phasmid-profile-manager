@@ -45,25 +45,22 @@ class VncDisplay:
         return RFB_BASE_PORT + self.number
 
 
-def display_geometry(launch_options: dict[str, Any]) -> tuple[int, int]:
+def display_geometry(pin: dict[str, Any] | None) -> tuple[int, int]:
     """The size of the browser window, so the window fills the whole display.
 
-    There is no window manager to maximize it, and Camoufox opens the window at
-    the fingerprint's outer size. A display sized to the fingerprint's screen
-    instead would show the window in one corner of a mostly black frame. Pages
-    see the spoofed screen either way, so the real display size does not leak.
+    There is no window manager to maximize it, and Phasmid opens the window at
+    the profile's outer size. A display sized to the profile's screen instead
+    would show the window in one corner of a mostly black frame. Pages see the
+    profile's screen either way, so the real display size does not leak.
     """
-    config = launch_options.get("config") or {}
-    for width_key, height_key in (
-        ("window.outerWidth", "window.outerHeight"),
-        ("screen.width", "screen.height"),
+    display = (pin or {}).get("display") or {}
+    window = display.get("window") or {}
+    for width, height in (
+        (window.get("outer_width"), window.get("outer_height")),
+        (display.get("width"), display.get("height")),
     ):
-        width, height = config.get(width_key), config.get(height_key)
         if isinstance(width, int) and isinstance(height, int) and width > 0 and height > 0:
             return width, height
-    window = launch_options.get("window")
-    if window:
-        return int(window[0]), int(window[1])
     return DEFAULT_GEOMETRY
 
 

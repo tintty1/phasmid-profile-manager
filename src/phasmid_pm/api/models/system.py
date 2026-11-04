@@ -93,26 +93,24 @@ class SystemConfigData(BaseModel):
     user_auth_enabled: bool
     encryption_enabled: bool
     cors_origins: list[str]
-    camoufox_available: bool
+    browser_available: bool
+    browser_version: str | None = None
     uptime_seconds: int
 
 
-class DevicePreset(BaseModel):
-    """A fingerprint captured from a real machine, from Camoufox's catalogue."""
+class GpuChoice(BaseModel):
+    """A GPU a generated machine may claim, because a captured host backs it."""
 
-    id: str = Field(..., description="Preset id, '<os>:<index>'")
     os: str
-    screen: str | None = None
-    hardware_concurrency: int | None = None
-    gpu: str | None = None
-    vendor: str | None = None
-    user_agent: str | None = None
+    gpu: str = Field(..., description="'<vendor_id>:<device_id>', the browser_settings.gpu value")
+    renderer: str = Field(..., description="The WebGL unmasked renderer pages will see")
+    weight: int = Field(..., description="How often it is drawn when no GPU is chosen")
 
 
-class PresetListData(BaseModel):
-    """Payload of the preset catalogue endpoint."""
+class GpuListData(BaseModel):
+    """Payload of the GPU catalogue endpoint."""
 
-    presets: list[DevicePreset]
+    gpus: list[GpuChoice]
     total: int
 
 

@@ -1,32 +1,9 @@
-"""Integration tests for the browser-control endpoints.
-
-No browser is started: a stand-in session is registered so the endpoints that
-report and close them can be checked without a Camoufox binary.
-"""
+"""Integration tests for the browser-control endpoints, against the fake browser."""
 
 import pytest
 
 from phasmid_pm.api.dependencies import get_profile_manager
-from phasmid_pm.core.browser_session import BrowserSession
-
-
-class FakeCamoufox:
-    """Stands in for a running AsyncCamoufox and records that it was closed."""
-
-    def __init__(self):
-        self.exits = 0
-
-    async def __aexit__(self, *_exc):
-        self.exits += 1
-
-
-def register(profile_id: str) -> FakeCamoufox:
-    """Register a running browser for a profile."""
-    camoufox = FakeCamoufox()
-    get_profile_manager().browser_sessions.active_sessions[profile_id] = BrowserSession(
-        profile_id, camoufox=camoufox, process_id=4242
-    )
-    return camoufox
+from tests.fakes import launch_through_api
 
 
 @pytest.mark.asyncio
@@ -38,26 +15,27 @@ async def test_no_browsers_are_reported_when_none_are_running(client):
 
 @pytest.mark.asyncio
 async def test_a_running_browser_is_listed_with_its_process(client):
-    register("p1")
+    profile_id, session = await launch_through_api(client, "p1")
 
     body = (await client.get("/api/browsers/active")).json()
 
     assert body["count"] == 1
-    assert body["active_browsers"][0]["profile_id"] == "p1"
-    assert body["active_browsers"][0]["process_id"] == 4242
+    assert body["active_browsers"][0]["profile_id"] == profile_id
+    assert body["active_browsers"][0]["process_id"] == session.process_id
+    assert body["active_browsers"][0]["cdp"] is True
     assert body["active_browsers"][0]["started_at"]
 
 
 @pytest.mark.asyncio
 async def test_closing_one_browser_leaves_the_others_running(client):
-    first = register("p1")
-    second = register("p2")
+    first_id, first = await launch_through_api(client, "p1")
+    _, second = await launch_through_api(client, "p2")
 
-    result = (await client.post("/api/profiles/p1/close")).json()
+    result = (await client.post(f"/api/profiles/{first_id}/close")).json()
 
     assert result["status"] == "closed"
-    assert first.exits == 1
-    assert second.exits == 0
+    assert first.process.returncode is not None
+    assert second.process.returncode is None
     assert (await client.get("/api/browsers/active")).json()["count"] == 1
 
 
@@ -72,12 +50,12 @@ async def test_closing_a_browser_that_is_not_running_is_not_an_error(client):
 
 @pytest.mark.asyncio
 async def test_close_all_closes_every_browser_and_counts_them(client):
-    browsers = [register("p1"), register("p2"), register("p3")]
+    browsers = [(await launch_through_api(client, name))[1] for name in ("p1", "p2", "p3")]
 
     body = (await client.post("/api/browsers/close-all")).json()
 
     assert body["closed_count"] == 3
-    assert [b.exits for b in browsers] == [1, 1, 1]
+    assert all(b.process.returncode is not None for b in browsers)
     assert (await client.get("/api/browsers/active")).json()["count"] == 0
 
 

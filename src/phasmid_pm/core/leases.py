@@ -68,3 +68,21 @@ def lease_expired(lock_expires: str | None) -> bool:
         now = datetime.now(parsed.tzinfo) if parsed.tzinfo else datetime.now()
         return parsed < now
     return False
+
+
+def holder_alive(holder: str | None, lock_expires: str | None) -> bool:
+    """Whether a lease's holder may still be running.
+
+    On this host the holder's pid answers it directly, so a crashed instance
+    is recognised at once rather than after its lease's TTL. A holder on
+    another host is alive for as long as its lease is.
+    """
+    if not holder:
+        return False
+    host, _, rest = holder.partition(":")
+    pid_text = rest.partition(":")[0]
+    if host == socket.gethostname() and pid_text.isdigit():
+        import psutil
+
+        return int(pid_text) != os.getpid() and psutil.pid_exists(int(pid_text))
+    return not lease_expired(lock_expires)

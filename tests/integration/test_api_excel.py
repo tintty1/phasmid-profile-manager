@@ -18,7 +18,7 @@ async def test_the_export_is_served_as_a_spreadsheet_download(client):
 
     assert response.status_code == 200
     assert response.headers["content-type"] == XLSX
-    assert "camoufox_profiles.xlsx" in response.headers["content-disposition"]
+    assert "phasmid_profiles.xlsx" in response.headers["content-disposition"]
     assert response.content[:2] == b"PK", "an xlsx is a zip"
 
 

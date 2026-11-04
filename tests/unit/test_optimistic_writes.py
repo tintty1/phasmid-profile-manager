@@ -227,76 +227,47 @@ async def test_an_edit_without_a_version_still_works(profile_manager):
     assert updated.notes == "no version sent"
 
 
-async def test_an_edit_after_a_launch_keeps_the_pinned_machine(profile_manager, monkeypatch):
+async def test_an_edit_after_a_launch_keeps_the_pinned_machine(profile_manager):
     """The path users actually take: the manager re-reads, so nothing is reverted."""
-    from phasmid_pm.core import profile_manager as pm_module
-
-    class FakeSession:
-        process_id = 1
-        mode = "window"
-        playwright_endpoint = None
-
-        async def terminate(self):
-            pass
-
-    async def fake_launch(profile_id, options, on_exit=None, mode=None):
-        profile_manager.browser_sessions.active_sessions[profile_id] = FakeSession()
-        return FakeSession()
-
-    monkeypatch.setattr(profile_manager.browser_sessions, "launch", fake_launch)
-    monkeypatch.setattr(
-        pm_module.fingerprint_store, "resolve", lambda *_a, **_kw: {"navigator.userAgent": "pinned"}
-    )
-
     profile = await profile_manager.create_profile(name="p")
-    await profile_manager.launch_browser(profile.id)
+    await profile_manager.launch_browser(profile.id, mode="headless")
+    pinned = (await profile_manager.get_profile(profile.id)).fingerprint
 
     await profile_manager.update_profile(profile.id, {"notes": "edited after the launch"})
 
     stored = await profile_manager.get_profile(profile.id)
-    assert stored.fingerprint == {"navigator.userAgent": "pinned"}
+    assert stored.fingerprint == pinned
     assert stored.notes == "edited after the launch"
     assert stored.last_used is not None
 
 
-async def test_an_edit_made_while_a_launch_resolves_is_not_reverted(profile_manager, monkeypatch):
-    """The hazard the launch path used to carry, reproduced.
+async def test_an_edit_made_while_a_launch_moves_the_machine_is_not_reverted(
+    profile_manager, phasmid
+):
+    """The hazard the launch path would carry if it wrote the whole Profile back.
 
-    resolve() can go to the network, and a launch used to write the whole
-    Profile back afterwards — reverting anything saved during that wait. Here
-    the rename lands while resolve is running, exactly as another instance's
-    save would.
+    A launch waits on the exit lookup and on genprofile, and anything saved
+    during that wait must survive. Here the rename lands during the lookup,
+    exactly as another instance's save would.
     """
-    from phasmid_pm.core import profile_manager as pm_module
-
-    class FakeSession:
-        process_id = 1
-        mode = "window"
-        playwright_endpoint = None
-
-        async def terminate(self):
-            pass
-
-    async def fake_launch(profile_id, options, on_exit=None, mode=None):
-        profile_manager.browser_sessions.active_sessions[profile_id] = FakeSession()
-        return FakeSession()
+    from phasmid_pm.core import proxy_check
 
     profile = await profile_manager.create_profile(name="before the launch")
+    lookup = proxy_check.resolve_exit_ip
 
-    def resolve_slowly(*_args, **_kwargs):
-        # Another instance saving mid-resolve. Written through the connection
-        # because this runs synchronously inside the launch.
+    async def look_up_slowly(proxy, timeout=10.0):
+        # Another instance saving while the exit is being looked up.
         profile_manager.storage.db._connection.execute(  # noqa: SLF001
             "UPDATE profiles SET name = ? WHERE id = ?", ("renamed during the launch", profile.id)
         )
         profile_manager.storage.db._connection.commit()  # noqa: SLF001
-        return {"navigator.userAgent": "pinned"}
+        return await lookup(proxy, timeout)
 
-    monkeypatch.setattr(profile_manager.browser_sessions, "launch", fake_launch)
-    monkeypatch.setattr(pm_module.fingerprint_store, "resolve", resolve_slowly)
+    proxy_check.resolve_exit_ip = look_up_slowly  # restored by the phasmid fixture
+    phasmid.exit_ip = "203.0.113.20"
 
-    await profile_manager.launch_browser(profile.id)
+    await profile_manager.launch_browser(profile.id, mode="headless")
 
     stored = await profile_manager.get_profile(profile.id)
     assert stored.name == "renamed during the launch"
-    assert stored.fingerprint == {"navigator.userAgent": "pinned"}
+    assert stored.fingerprint["locale"]["timezone"] == "Asia/Tokyo"

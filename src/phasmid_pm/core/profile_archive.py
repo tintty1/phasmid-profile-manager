@@ -1,7 +1,7 @@
 """Pack a whole profile into one file, and unpack it again.
 
 A profile is only partly rows in the database. The rest of it — cookies, local
-storage, history, saved logins — lives in a Firefox profile directory, and an
+storage, history, saved logins — lives in a Chromium user data directory, and an
 account that has been warmed up for months is mostly that directory. Exporting
 the settings alone would move the costume without the memory.
 
@@ -141,7 +141,7 @@ def read_archive(source: Path) -> dict[str, Any]:
     with zipfile.ZipFile(source) as archive:
         names = set(archive.namelist())
         if MANIFEST_NAME not in names or PROFILE_NAME not in names:
-            raise ValueError("Not a Camoufox profile archive")
+            raise ValueError("Not a Phasmid profile archive")
 
         for name in (MANIFEST_NAME, PROFILE_NAME):
             if archive.getinfo(name).file_size > _MAX_METADATA_BYTES:

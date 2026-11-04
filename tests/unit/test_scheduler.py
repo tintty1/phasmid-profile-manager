@@ -9,7 +9,6 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from phasmid_pm.core import profile_manager as pm_module
 from phasmid_pm.core.models import Schedule, ScheduleRun, ScheduleRunOutcome
 from phasmid_pm.core.scheduler import TaskScheduler, next_run_after
 
@@ -48,7 +47,9 @@ def launches(profile_manager, monkeypatch):
     class FakeSession:
         process_id = 4242
         mode = "window"
-        playwright_endpoint = None
+
+        async def terminate(self):
+            pass
 
     async def fake_launch(profile_id, options, on_exit=None, mode=None):
         recorded.append(profile_id)
@@ -56,7 +57,6 @@ def launches(profile_manager, monkeypatch):
         return FakeSession()
 
     monkeypatch.setattr(profile_manager.browser_sessions, "launch", fake_launch)
-    monkeypatch.setattr(pm_module.fingerprint_store, "resolve", lambda *_a, **_k: {})
     return recorded
 
 
@@ -105,7 +105,7 @@ def test_the_expression_must_match_the_kind():
     with pytest.raises(ValueError, match="weekdays"):
         make_schedule("p", kind="daily", interval_minutes=None, at_time="09:00", days=[7])
     with pytest.raises(ValueError, match="launch"):
-        make_schedule("p", action="refresh_browser", run_minutes=10)
+        make_schedule("p", action="refresh_browser")
 
 
 # -- Firing ---------------------------------------------------------------------
@@ -251,25 +251,6 @@ async def test_run_now_executes_but_leaves_the_plan_alone(
     assert launches == [profile.id]
     stored = await profile_manager.storage.get_schedule(schedule.id)
     assert stored.next_run_at == planned
-
-
-async def test_refresh_browser_records_the_failure_when_there_is_no_pin(
-    profile_manager, scheduler, clock
-):
-    """Without a pinned machine there is nothing to refresh; the run says so."""
-    profile = await profile_manager.create_profile(name="unpinned")
-    schedule = make_schedule(
-        profile.id,
-        action="refresh_browser",
-        next_run_at=MONDAY - timedelta(minutes=1),
-    )
-    await profile_manager.storage.save_schedule(schedule)
-
-    await scheduler.tick()
-
-    runs = await profile_manager.storage.list_schedule_runs(schedule.id)
-    assert runs[0].outcome == ScheduleRunOutcome.ERROR
-    assert "no pinned machine" in runs[0].message
 
 
 # -- Restart behaviour ----------------------------------------------------------

@@ -9,6 +9,7 @@ import pytest
 from phasmid_pm.core import proxy_check
 from phasmid_pm.core.models import BrowserSettings, ProxyConfig, ProxyType
 from phasmid_pm.core.proxy_check import ProxyLocation, compare, preflight, proxy_url
+from tests.fakes import fake_pin
 
 TOKYO = ProxyLocation(
     ip="203.0.113.7",
@@ -61,37 +62,48 @@ def test_no_timezone_means_it_follows_the_proxy():
     assert "follows the proxy" in findings[0].message
 
 
-def test_coordinates_without_a_timezone_still_follow_the_proxy():
-    """Coordinates turn Camoufox's geoip off, which used to leave the timezone
-    unset and let Firefox report the host machine's own zone. The launch path now
-    fills it from the same exit address, so this is no longer a mismatch."""
-    settings = BrowserSettings(timezone=None, geolocation={"lat": 35.68, "lon": 139.69})
-
-    assert levels(compare(settings, TOKYO), "timezone") == ["info"]
+def placed_at(lat: float, lon: float, ip: str = TOKYO.ip) -> dict:
+    """A pinned machine whose stored position is (lat, lon), placed at ``ip``."""
+    pin = fake_pin(timezone="Asia/Tokyo", public_ip=ip)
+    pin["locale"]["geolocation"] = {"latitude": lat, "longitude": lon, "accuracy": 50000}
+    return pin
 
 
-def test_coordinates_far_from_the_exit_are_a_warning():
-    settings = BrowserSettings(timezone="Asia/Tokyo", geolocation={"lat": 52.52, "lon": 13.405})
+def test_a_machine_placed_at_another_exit_will_be_moved():
+    findings = compare(BrowserSettings(), TOKYO, placed_at(52.52, 13.405, ip=BERLIN.ip))
 
-    findings = compare(settings, TOKYO)
+    assert levels(findings, "location") == ["info"]
+    assert TOKYO.ip in findings[-1].message
+    # The old position is about to be replaced; measuring it would only alarm.
+    assert levels(findings, "geolocation") == []
+
+
+def test_a_machine_already_at_this_exit_says_nothing_about_moving():
+    assert levels(compare(BrowserSettings(), TOKYO, placed_at(35.70, 139.70)), "location") == []
+
+
+def test_a_position_far_from_the_exit_is_a_warning():
+    settings = BrowserSettings(timezone="Asia/Tokyo")
+
+    findings = compare(settings, TOKYO, placed_at(52.52, 13.405))
 
     assert levels(findings, "geolocation") == ["warning"]
     assert "km from where the proxy exits" in findings[-1].message
 
 
-def test_coordinates_in_the_next_city_are_only_a_note():
+def test_a_position_in_the_next_city_is_only_a_note():
     """Osaka is 400 km from Tokyo: the same country, and within one story."""
-    settings = BrowserSettings(timezone="Asia/Tokyo", geolocation={"lat": 34.69, "lon": 135.50})
+    settings = BrowserSettings(timezone="Asia/Tokyo")
 
-    findings = compare(settings, TOKYO)
+    findings = compare(settings, TOKYO, placed_at(34.69, 135.50))
 
     assert levels(findings, "geolocation") == ["info"]
 
 
-def test_coordinates_in_the_same_city_say_nothing_extra():
-    settings = BrowserSettings(timezone="Asia/Tokyo", geolocation={"lat": 35.70, "lon": 139.70})
+def test_a_position_in_the_same_city_says_nothing_extra():
+    settings = BrowserSettings(timezone="Asia/Tokyo")
 
-    assert compare(settings, TOKYO) == []
+    assert compare(settings, TOKYO, placed_at(35.70, 139.70)) == []
 
 
 def test_an_unplaceable_exit_address_still_compares_what_it_can():
@@ -101,25 +113,30 @@ def test_an_unplaceable_exit_address_still_compares_what_it_can():
     assert findings == []
 
 
-def test_an_unknown_timezone_name_is_treated_as_a_contradiction():
-    """A name zoneinfo cannot resolve cannot be shown to agree, so it does not get
-    the benefit of the doubt."""
-    findings = compare(BrowserSettings(timezone="Mars/Olympus"), TOKYO)
-
-    assert levels(findings, "timezone") == ["warning"]
+def test_an_unknown_timezone_name_is_refused_by_the_settings():
+    """A name zoneinfo cannot resolve would reach genprofile and fail there."""
+    with pytest.raises(ValueError, match="Unknown timezone"):
+        BrowserSettings(timezone="Mars/Olympus")
 
 
-@pytest.mark.parametrize("kind", [ProxyType.SOCKS4, ProxyType.SOCKS5])
-def test_socks_with_credentials_is_reported_before_any_request(kind):
-    """Firefox refuses to authenticate to a SOCKS proxy, so the launch fails.
+def test_socks4_with_credentials_is_reported_before_any_request():
+    """SOCKS4 has no password authentication, so the launch would fail.
 
     Better to say so on the check button than to let the user find out when the
     browser will not start.
     """
-    findings = preflight(ProxyConfig(type=kind, server="h:1080", username="u", password="p"))
+    findings = preflight(
+        ProxyConfig(type=ProxyType.SOCKS4, server="h:1080", username="u", password="p")
+    )
 
     assert [f.level for f in findings] == ["error"]
     assert "fail to launch" in findings[0].message
+
+
+def test_socks5_with_credentials_is_fine():
+    """proxyroute relays SOCKS5 credentials, which Chrome cannot send itself."""
+    proxy = ProxyConfig(type=ProxyType.SOCKS5, server="h:1080", username="u", password="p")
+    assert preflight(proxy) == []
 
 
 def test_socks_without_credentials_is_fine():
@@ -245,80 +262,3 @@ async def test_a_failure_is_reported_in_words_the_user_can_act_on(answers, failu
 
     with pytest.raises(ConnectionError, match=expected):
         await proxy_check.resolve_exit_ip(None)
-
-
-@pytest.mark.asyncio
-async def test_the_ipv6_answer_goes_into_the_ipv6_key(answers):
-    """Camoufox routes a v6 exit address to webrtc:ipv6, and so must this."""
-    answers("2001:db8::1")
-    options = {"geoip": False, "config": {"timezone": "Asia/Tokyo"}}
-
-    await proxy_check.fill_what_geoip_would_have(None, options)
-
-    assert options["config"]["webrtc:ipv6"] == "2001:db8::1"
-    assert "webrtc:ipv4" not in options["config"]
-    assert "firefox_user_prefs" not in options
-
-
-@pytest.mark.asyncio
-async def test_a_spoofed_v4_candidate_brings_its_pref(answers):
-    """Camoufox sets this alongside webrtc:ipv4 so a page cannot reach around the
-    spoofed candidate over IPv6."""
-    answers("203.0.113.7")
-    options = {"geoip": False, "config": {"timezone": "Asia/Tokyo"}}
-
-    await proxy_check.fill_what_geoip_would_have(None, options)
-
-    assert options["config"]["webrtc:ipv4"] == "203.0.113.7"
-    assert options["firefox_user_prefs"]["network.dns.disableIPv6"] is True
-
-
-@pytest.mark.asyncio
-async def test_the_pref_joins_any_others_already_set(answers):
-    """stable_canvas puts its own pref here; filling must not replace it."""
-    answers("203.0.113.7")
-    options = {
-        "geoip": False,
-        "config": {"timezone": "Asia/Tokyo"},
-        "firefox_user_prefs": {"privacy.baselineFingerprintingProtection": False},
-    }
-
-    await proxy_check.fill_what_geoip_would_have(None, options)
-
-    assert options["firefox_user_prefs"] == {
-        "privacy.baselineFingerprintingProtection": False,
-        "network.dns.disableIPv6": True,
-    }
-
-
-@pytest.mark.asyncio
-async def test_nothing_is_asked_when_geoip_will_do_it(answers):
-    client = answers("203.0.113.7")
-
-    await proxy_check.fill_what_geoip_would_have(None, {"geoip": True, "config": {}})
-
-    assert client.asked == []
-
-
-@pytest.mark.asyncio
-async def test_a_blocked_webrtc_profile_is_left_alone(answers):
-    """webrtc_mode "none" removes RTCPeerConnection; spoofing an address is moot."""
-    answers("203.0.113.7")
-    options = {"geoip": False, "block_webrtc": True, "config": {"timezone": "Asia/Tokyo"}}
-
-    await proxy_check.fill_what_geoip_would_have(None, options)
-
-    assert "webrtc:ipv4" not in options["config"]
-
-
-@pytest.mark.asyncio
-async def test_an_unreachable_proxy_does_not_block_the_launch(monkeypatch):
-    async def refuse(proxy, timeout=proxy_check.DEFAULT_TIMEOUT):
-        raise ConnectionError("nope")
-
-    monkeypatch.setattr(proxy_check, "resolve_exit_ip", refuse)
-    options = {"geoip": False, "config": {}}
-
-    await proxy_check.fill_what_geoip_would_have(None, options)
-
-    assert options["config"] == {}

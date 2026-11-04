@@ -16,7 +16,12 @@ Shell (stdlib only, prints JSON):
   ppm.py machine ID_OR_NAME                            the whole Phasmid profile JSON
   ppm.py protect ID_OR_NAME                            (refuse delete / new machine)
   ppm.py update ID_OR_NAME --json '{"notes": "..."}'   (sends row_version for you)
-  ppm.py delete ID_OR_NAME                             (moves to Trash)
+  ppm.py clone ID_OR_NAME NEW_NAME [--same-machine]   (new hardware unless --same-machine)
+  ppm.py delete ID_OR_NAME                             (moves to Trash; recoverable)
+  ppm.py trash                                         profiles in Trash
+  ppm.py restore ID_OR_NAME                            back out of Trash
+  ppm.py purge ID_OR_NAME --yes                        erase a Trash entry for good
+  ppm.py destroy ID_OR_NAME --yes                      close + Trash + erase, in one go
   ppm.py launch ID_OR_NAME [--mode headless|virtual|window]
   ppm.py close ID_OR_NAME
   ppm.py active
@@ -97,6 +102,35 @@ def resolve(id_or_name: str) -> dict[str, Any]:
     return found[0]
 
 
+def resolve_trashed(id_or_name: str) -> dict[str, Any]:
+    """A profile in Trash by id, or else by exact name."""
+    trashed = request("GET", "/trash/profiles")["data"]["profiles"]
+    found = [p for p in trashed if p["id"] == id_or_name] or [
+        p for p in trashed if p["name"] == id_or_name
+    ]
+    if not found:
+        raise PpmError(404, "not_found", f"no profile in Trash with id or name {id_or_name!r}")
+    if len(found) > 1:
+        ids = ", ".join(p["id"] for p in found)
+        raise PpmError(
+            409, "ambiguous", f"{len(found)} trashed profiles are named {id_or_name!r}: {ids}"
+        )
+    return found[0]
+
+
+def destroy(id_or_name: str) -> dict[str, Any]:
+    """Close the profile if it runs, move it to Trash and erase it. Irreversible.
+
+    The profile's directory (cookies, logins, history) is deleted with it.
+    Protected profiles are refused (409 protected) by the server.
+    """
+    profile = resolve(id_or_name)
+    request("POST", f"/profiles/{profile['id']}/close")
+    request("DELETE", f"/profiles/{profile['id']}")
+    request("DELETE", f"/trash/profiles/{profile['id']}", confirm="true")
+    return {"destroyed": profile["id"], "name": profile["name"]}
+
+
 def parse_proxy(url: str) -> dict[str, Any]:
     """socks5://user:pass@host:port -> the API's proxy_config."""
     parts = urllib.parse.urlsplit(url)
@@ -157,11 +191,24 @@ def _main() -> None:
     sub.add_parser("modes")
     sub.add_parser("active")
     sub.add_parser("gpus").add_argument("--os", choices=["linux", "windows"])
+    sub.add_parser("trash")
+    p = sub.add_parser("clone")
+    p.add_argument("profile")
+    p.add_argument("new_name")
+    p.add_argument(
+        "--same-machine",
+        action="store_true",
+        help="copy the hardware too: the two profiles become provably one computer",
+    )
+    for name in ("purge", "destroy"):
+        p = sub.add_parser(name)
+        p.add_argument("profile")
+        p.add_argument("--yes", action="store_true", help="confirm: this cannot be undone")
     p = sub.add_parser("list")
     p.add_argument("--search")
     p.add_argument("--group")
     p.add_argument("--status")
-    for name in ("get", "delete", "close", "protect", "machine"):
+    for name in ("get", "delete", "close", "protect", "machine", "restore"):
         sub.add_parser(name).add_argument("profile")
     p = sub.add_parser("create")
     p.add_argument("name")
@@ -235,6 +282,25 @@ def _main() -> None:
             out = request("PUT", f"/profiles/{profile['id']}", body)
         elif args.cmd == "delete":
             out = request("DELETE", f"/profiles/{resolve(args.profile)['id']}")
+        elif args.cmd == "clone":
+            source = resolve(args.profile)
+            body = {"new_name": args.new_name, "regenerate_fingerprint": not args.same_machine}
+            out = request("POST", f"/profiles/{source['id']}/clone", body)
+        elif args.cmd == "trash":
+            out = request("GET", "/trash/profiles")["data"]["profiles"]
+        elif args.cmd == "restore":
+            trashed = resolve_trashed(args.profile)
+            out = request("POST", f"/trash/profiles/{trashed['id']}/restore")
+        elif args.cmd in ("purge", "destroy"):
+            if not args.yes:
+                raise PpmError(
+                    400, "unconfirmed", f"{args.cmd} erases the profile for good; pass --yes"
+                )
+            if args.cmd == "purge":
+                trashed = resolve_trashed(args.profile)
+                out = request("DELETE", f"/trash/profiles/{trashed['id']}", confirm="true")
+            else:
+                out = destroy(args.profile)
         elif args.cmd == "launch":
             out = launch(args.profile, args.mode)
             out.pop("launch", None)  # launch internals; noise for an agent

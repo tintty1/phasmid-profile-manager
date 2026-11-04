@@ -1,165 +1,214 @@
 ---
 name: phasmid-profile-manager
-description: Drive Phasmid Profile Manager (phasmid-pm) to automate websites in persistent anti-detect browser profiles — create, find, edit, clone and delete profiles (machine, OS, GPU, proxy), launch a profile headless, on a virtual display or as a desktop window, and control it over CDP (Playwright connect_over_cdp, Puppeteer) through its cdp_endpoint. Use this whenever a task involves Phasmid, phasmid-pm, a "browser profile", an anti-detect or fingerprinted browser, a profile manager running on localhost:8000, or automating a site as a specific saved account/identity — even if the user only says "log in with profile X", "open shop-de-01 and check the orders page", or "spin up a few browser profiles behind these proxies".
+description: Create, copy (clone) and destroy persistent anti-detect browser profiles in Phasmid Profile Manager (phasmid-pm), and browse the web as one of them with Playwright over its CDP URL (chromium.connect_over_cdp). Use this whenever a task involves Phasmid, phasmid-pm, a "browser profile", an anti-detect or fingerprinted browser, a profile manager on localhost:8000, or doing something on a website as a specific saved account/identity — even if the user only says "log in with profile X", "make three copies of shop-de-01", "delete the test profiles", or "open this page from the Tokyo profile".
 ---
 
 # Phasmid Profile Manager
 
-Phasmid Profile Manager keeps **profiles**: each one is a persistent Chromium
-(Phasmid) identity — its own pinned machine (a Phasmid profile: OS, GPU, screen,
-fonts, CPU, memory), proxy, cookies and storage. It runs as a server (by default `http://127.0.0.1:8000`, often via
-`docker compose up`) with a REST API under `/api/v1` and a web UI at `/`.
+A **profile** is one persistent identity: a pinned machine (a Phasmid profile —
+OS, GPU, screen, fonts, CPU, memory, generated once from real-device data), a
+proxy, and its own Chromium user data (cookies, logins, storage, history). The
+manager runs as a server (default `http://127.0.0.1:8000`, often `docker
+compose up`) with a REST API under `/api/v1` and a web UI at `/`.
 
-You manage profiles over REST, launch a profile's browser, then drive that browser
-over **CDP** through a WebSocket the launch hands back. The browser keeps the
-profile's cookies and logins between sessions, which is the whole point: you are
-acting *as that account*, on the same "machine" every time.
+You manage profiles over REST and browse by launching a profile's browser and
+attaching **Playwright over CDP** to the URL the launch returns. Every launch of
+a profile is the same computer, with the same cookies, so a site sees one
+returning user, not a new stranger.
 
 ## Setup
 
-- `PPM_URL` — the server (default `http://127.0.0.1:8000`). Check it is up with
+- `PPM_URL` — the server (default `http://127.0.0.1:8000`). Check it is up:
   `curl -s $PPM_URL/health`.
-- `PPM_API_KEY` — only if the server sets one; send it as `X-API-Key` on REST
-  calls and as an `x-api-key` header when connecting over CDP. A `401` means it
-  is missing or wrong.
-- Any recent Playwright (`pip install playwright`) or Puppeteer works: CDP is
-  Chrome's own protocol, so there is no client/server version lock. You do
-  **not** need `playwright install`: the browser runs on the server, you only
-  connect to it.
+- `PPM_API_KEY` — only if the server sets one; sent as `X-API-Key` on REST calls
+  and as an `x-api-key` header on the CDP connection. `401` means missing/wrong.
+- `pip install playwright` (any recent version; CDP has no version lock). You do
+  **not** need `playwright install` — the browser runs on the server.
+- A launch fails with "browser needs setup" until Phasmid is installed:
+  `POST /api/v1/system/browser/install`, then poll `GET /api/v1/system/browser`
+  until `state` is `ready`.
 
-## The helper script
+Two helpers sit next to this file. `scripts/ppm.py` (standard library only)
+does profile management and prints JSON; profile arguments take an id or an
+exact name. `scripts/browse.py` opens a URL in a profile and reports what it
+shows. Run them from anywhere; for anything they don't cover,
+[references/api.md](references/api.md) lists every endpoint.
 
-`scripts/ppm.py` (next to this file) wraps the API so you don't rebuild requests
-by hand. The shell side uses only the standard library and prints JSON; profile
-arguments accept an id or an exact name.
+## Create a profile
+
+Look first — reusing the right profile matters more than anything else, since a
+new profile is a logged-out stranger to every site:
 
 ```bash
-python scripts/ppm.py modes                       # what this server can launch in
 python scripts/ppm.py list --search shop
-python scripts/ppm.py gpus --os windows             # GPUs a new machine may claim
-python scripts/ppm.py create shop-de-01 --os windows --proxy socks5://user:pass@host:1080
-python scripts/ppm.py machine shop-de-01           # the whole pinned Phasmid profile
-python scripts/ppm.py update shop-de-01 --json '{"notes": "2FA on"}'
-python scripts/ppm.py launch shop-de-01 --mode headless
-python scripts/ppm.py close shop-de-01
-python scripts/ppm.py protect shop-de-01         # refuse deletes / new hardware from now on
-python scripts/ppm.py delete shop-de-01          # to Trash; stop it first
+python scripts/ppm.py get shop-de-01
 ```
 
-From Python, `open_profile` launches (or finds running) and connects in one step:
+Create one only when the task needs a new identity:
+
+```bash
+python scripts/ppm.py create shop-de-01 --os windows \
+    --proxy http://user:pass@proxy.example:8080
+python scripts/ppm.py create research-01                 # Linux, direct connection
+python scripts/ppm.py gpus --os linux                    # GPUs a machine may claim
+python scripts/ppm.py create gpu-pick --os linux --gpu 0x10de:0x2504 --protected
+```
+
+- `--os` is `linux` (default) or `windows`; `--gpu` takes a `vendor:device` from
+  `gpus`. Both choose the hardware once, at creation.
+- Proxies: `http`, `https`, `socks5` (all with credentials) or `socks4` (none).
+  Check one before relying on it: `POST /api/v1/profiles/{id}/check-proxy`.
+- **Leave timezone and languages unset.** Every launch looks up where the proxy
+  exits and places the machine there (timezone, position, languages, WebRTC
+  address); the hardware never changes. Set them only when the user asks.
+- Offer `--protected` for a profile the user will keep (a real account): it
+  refuses deletion and new hardware until the user lifts it.
+
+## Copy a profile
+
+```bash
+python scripts/ppm.py clone shop-de-01 shop-de-02
+```
+
+A clone copies the settings, the proxy and the browser data (cookies, logins,
+storage; caches are left behind), and gets **new hardware** — that is right for
+a second account. `--same-machine` keeps the hardware too, which makes the two
+profiles provably one computer to any site that sees both; use it only when the
+user means "move/duplicate this exact machine". Both copies share the source's
+proxy, so give the clone its own before running both:
+
+```bash
+python scripts/ppm.py update shop-de-02 --json \
+  '{"proxy_config": {"type": "http", "server": "proxy2.example:8080", "username": "u", "password": "p"}}'
+```
+
+A copy of a logged-in profile is logged in too — the same session, now in two
+places. For a fresh account, create rather than clone.
+
+## Destroy a profile
+
+Two steps, on purpose:
+
+```bash
+python scripts/ppm.py delete shop-de-02        # to Trash: recoverable
+python scripts/ppm.py trash                    # what is in Trash
+python scripts/ppm.py restore shop-de-02       # undo
+python scripts/ppm.py purge shop-de-02 --yes   # erase from Trash, for good
+python scripts/ppm.py destroy shop-de-02 --yes # close + Trash + erase in one go
+```
+
+- `delete` needs the browser closed (`409` while it runs); `destroy` closes it
+  first.
+- Purging deletes the profile's directory — its cookies, logins and history.
+  It cannot be undone. Only purge or destroy when the user clearly asked to
+  delete for good; otherwise stop at `delete` and say it is in Trash.
+- A **protected** profile refuses delete, purge and destroy with `409` and code
+  `protected`. That is a final answer: report it. Never unprotect a profile
+  yourself to get past it.
+
+## Browse the web as a profile
+
+One command, when you only need to look:
+
+```bash
+python scripts/browse.py shop-de-01 https://example.com/account --text
+python scripts/browse.py shop-de-01 https://example.com --screenshot page.png --mode virtual
+```
+
+It runs headless unless `--mode` says otherwise, prints JSON with `status`,
+`url`, `title` (and `text` / `html` / `screenshot` when asked), and leaves the
+browser running unless `--stop`. Always pass a mode when launching yourself too:
+left out, the server's default may open a window on someone's desktop.
+
+To interact (log in, click, fill forms), drive it yourself:
+
+1. **Launch.** `POST /api/v1/profiles/{id}/launch` with `{"mode": ...}` returns
+   `cdp_endpoint`, e.g. `ws://127.0.0.1:8000/api/v1/profiles/<id>/cdp`. Launch
+   is idempotent: a running profile answers `already_running` with the same
+   endpoint, so always launch, then connect.
+2. **Connect** with `chromium.connect_over_cdp(cdp_endpoint)`.
+3. **Use the profile's own context**: `browser.contexts[0]`, its first page or a
+   new page in it. That context *is* the profile.
+4. **Disconnect** with `browser.close()` — over CDP it only drops your
+   connection; the browser keeps running. Stop it with
+   `POST /api/v1/profiles/{id}/close` if you started it and nobody needs it.
+
+```python
+import asyncio, os, urllib.request, json
+from playwright.async_api import async_playwright
+
+API = os.environ.get("PPM_URL", "http://127.0.0.1:8000") + "/api/v1"
+KEY = os.environ.get("PPM_API_KEY")
+
+def call(method, path, body=None):
+    req = urllib.request.Request(API + path, method=method,
+        data=json.dumps(body).encode() if body is not None else None,
+        headers={"Content-Type": "application/json", **({"X-API-Key": KEY} if KEY else {})})
+    with urllib.request.urlopen(req, timeout=300) as resp:
+        return json.loads(resp.read() or b"null")
+
+async def main(profile_id):
+    launch = call("POST", f"/profiles/{profile_id}/launch", {"mode": "headless"})
+    async with async_playwright() as p:
+        browser = await p.chromium.connect_over_cdp(
+            launch["cdp_endpoint"], headers={"x-api-key": KEY} if KEY else None)
+        context = browser.contexts[0]
+        page = context.pages[0] if context.pages else await context.new_page()
+        await page.goto("https://example.com/login")
+        await page.fill("#email", "me@example.com")
+        await page.click("button[type=submit]")
+        await page.wait_for_load_state("networkidle")
+        print(await page.title())
+        await browser.close()                       # disconnect only
+    call("POST", f"/profiles/{profile_id}/close")   # stop, if you started it
+
+asyncio.run(main("shop-de-01-id"))
+```
+
+Or from Python with the helper, which does launch/connect/disconnect for you:
 
 ```python
 import sys; sys.path.insert(0, "<this skill>/scripts")
 from ppm import open_profile
 
-async with open_profile("shop-de-01", mode="headless") as (page, context, info):
+async with open_profile("shop-de-01", mode="headless", stop_on_exit=True) as (page, context, info):
     await page.goto("https://example.com/account")
-    ...
 ```
 
-Use the script, or call the API directly when you need something it doesn't
-cover — [references/api.md](references/api.md) has every endpoint and body.
-
-## Workflow
-
-1. **Find or create the profile.** Look it up first (`list --search`, `get`);
-   create one only when the task needs a new identity. Reusing the right profile
-   matters more than anything else here — a fresh profile is a new, logged-out
-   stranger to every site.
-2. **Pick a mode** (`modes` shows what this server offers and its default):
-   - `headless` — no display at all. The default choice for unattended work.
-   - `virtual` — the browser draws on its own VNC display, which a person can
-     watch and take over from the web UI (Run → monitor button). Choose this
-     when a human might need to step in: a CAPTCHA, a 2FA prompt, a login you
-     can't complete, or when the user wants to watch.
-   - `window` — a real window on the server machine's desktop. Only when the user
-     asks for it; it is often unavailable in Docker.
-   Leaving `mode` out uses the server's default.
-3. **Launch, then connect.** `POST /profiles/{id}/launch` returns
-   `cdp_endpoint`; connect with `chromium.connect_over_cdp(endpoint)` (or
-   `puppeteer.connect({browserWSEndpoint: endpoint})`). Launch is
-   idempotent: a profile that is already running answers `already_running` with
-   the same endpoint and keeps its current mode, so always launch-then-connect
-   rather than guessing whether it is up.
-4. **Work in the profile's own context.** Use `browser.contexts[0]` and its
-   existing page (`context.pages[0]`) or `context.new_page()`. That context *is*
-   the profile — its cookies, storage and machine.
-5. **Finish.** `browser.close()` on your side only **disconnects** you; the
-   profile keeps running. If you launched it for this task and nobody needs it
-   afterwards, stop it with `POST /profiles/{id}/close` (or
-   `open_profile(..., stop_on_exit=True)`). Leave alone browsers you didn't start.
-
-```python
-from playwright.async_api import async_playwright
-
-launch = POST(f"/profiles/{pid}/launch", {"mode": "headless"})
-async with async_playwright() as p:
-    browser = await p.chromium.connect_over_cdp(launch["cdp_endpoint"],
-                                                headers={"x-api-key": key} if key else None)
-    context = browser.contexts[0]
-    page = context.pages[0] if context.pages else await context.new_page()
-    await page.goto("https://example.com")
-    await browser.close()            # disconnect; the profile stays up
-POST(f"/profiles/{pid}/close")      # stop it, if you started it
-```
+Modes (`python scripts/ppm.py modes` shows what this server offers):
+`headless` for unattended work; `virtual` — its own VNC display a person can
+watch and take over in the web UI (pick it when a CAPTCHA, 2FA or a login only
+the user can finish may come up); `window` — a real window on the server's
+desktop, only when asked. An already-running profile keeps its mode.
 
 ## Things that will bite you
 
-- **Don't `browser.new_context()`.** A new context is a blank, non-persistent
-  browser with none of the profile's cookies — anything you log into there is
-  lost, and it isn't the identity you were asked to use.
-- **Logins persist; "session-only" cookies don't.** Stopping and relaunching a
-  profile keeps everything a normal browser keeps: cookies with an expiry date
-  (most logins, Google's included), localStorage, IndexedDB, saved passwords.
-  Like any Chrome, it drops cookies the site set *without* an expiry when the
-  browser exits. So when you log in for later use, tick "stay signed in" /
-  "remember me" if the site offers it; on a site that still keeps you logged in
-  only for the session, leave the profile running instead of stopping it.
-- **Don't fight the machine.** Avoid `set_viewport_size`, `Emulation.*`
-  overrides, and overriding the user agent, timezone, locale or geolocation from
-  the client. Phasmid reports one consistent machine from inside the browser, in
-  every frame and worker; an override from outside reaches only some of them,
-  which is exactly what detection looks for. Change settings on the profile
-  instead (`PUT`) and relaunch.
-- **One browser per profile.** Two agents can connect to the same running profile
-  and will share its pages — coordinate, or use separate profiles for parallel
-  work. A `409 conflict` on launch means another manager instance has it open.
-- **Edits are merged and versioned.** `PUT /profiles/{id}` merges
-  `browser_settings` over what is stored; a field set to `null` is cleared, an
-  omitted field is left alone. Send the `row_version` you read; `409
-  stale_write` means someone saved in between — re-read and reapply. Settings
-  apply on the next launch, so close and relaunch a running profile after editing.
-- **Protected profiles are off limits.** A profile with `"protected": true` is
-  one the user cares about (a warmed-up account). Moving it to Trash, purging
-  it, `reset-fingerprint` and `reconcile-os` with `keep_machine: false` are
-  refused with `409` and error code `protected`. Treat that as a final answer:
-  report it to the user. Never set `protected` to `false` yourself to get
-  past it — lifting protection is the user's decision, so only do it when they
-  explicitly ask for that profile. Edits, launching and cloning still work.
-- **Deleting needs a stopped profile** (`409` otherwise) and only moves it to
-  Trash; erasing it for good is a separate, deliberate call. Don't erase
-  profiles unless the user clearly asked — they hold real accounts' sessions.
-  When you create a profile the user will keep (a real account), offer to
-  create it with `--protected`.
-- **Clones get new hardware** by default (`regenerate_fingerprint: true`) — that
-  is right for a second account. Copying the machine makes two "different"
-  accounts provably one computer.
-- **Geography follows the proxy.** Leave `timezone` and `languages` unset and
-  every launch places the machine at its exit address: timezone, position,
-  languages and the WebRTC address, with the hardware untouched. A launch whose
-  proxy does not answer is refused. Run `POST /profiles/{id}/check-proxy`
-  before relying on a new proxy.
-- **OS and GPU are the hardware.** Changing them on a profile that already has
-  a machine does nothing until `reset-fingerprint` gives it a new one, which a
-  warmed-up account should not get lightly.
-- **Setup first.** Launches fail with a "browser needs setup" error until
-  Phasmid is installed: start it with `POST /api/v1/system/browser/install` and
-  poll `GET /api/v1/system/browser` until `state` is `ready`.
+- **Don't `browser.new_context()`.** It is a blank, throw-away browser with none
+  of the profile's cookies, and not the identity you were asked to use.
+- **Don't fight the machine.** No `set_viewport_size`, `Emulation.*`
+  overrides, or user agent / timezone / locale / geolocation overrides from the
+  client. Phasmid reports one consistent machine from inside the browser, in
+  every frame and worker; an outside override reaches only some of them, which
+  is exactly what detection looks for. Change the profile (`PUT`) and relaunch.
+- **Session-only cookies go when the browser stops.** Logins with an expiry
+  date persist across launches; tick "remember me" when logging in for later,
+  or leave the profile running.
+- **One browser per profile.** Two clients on one running profile share its
+  pages. `409` on launch means another manager instance has it open.
+- **A proxy that does not answer stops the launch** (the exit address could
+  not be looked up). Fix or check the proxy rather than retrying.
+- **Edits merge and are versioned.** `PUT /profiles/{id}` merges
+  `browser_settings`; send the `row_version` you read (`ppm.py update` does).
+  `409 stale_write` means someone saved in between: re-read and reapply.
+  Settings apply at the next launch.
+- **OS and GPU are the hardware.** Changing them on an existing profile does
+  nothing until `POST /profiles/{id}/reset-fingerprint` gives it a new machine
+  — a real cost for a warmed-up account; don't do it unasked.
 
 ## Errors
 
-Every error body is `{"error": {"code", "message", "details"}}` — read
-`error.message`; it usually says what to do. Codes: `not_found` (404),
-`conflict` / `stale_write` / `protected` (409), `validation_error` (422,
-`details` lists the fields), `unauthorized` (401). The CDP relay closes the socket with 4401
-(auth), 4404 (profile not running — launch it first) or 4403 (origin).
+Every error body is `{"error": {"code", "message", "details"}}`; `message`
+usually says what to do. Codes: `not_found` (404), `conflict` / `stale_write` /
+`protected` (409), `validation_error` (422), `unauthorized` (401). The CDP relay
+closes the socket with 4401 (auth), 4404 (profile not running — launch it first)
+or 4403 (origin not allowed).

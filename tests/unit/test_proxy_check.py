@@ -6,9 +6,9 @@ compare() is pure, so every rule is tested here without a proxy or a network.
 import httpx
 import pytest
 
-from camoufox_pm.core import proxy_check
-from camoufox_pm.core.models import BrowserSettings, ProxyConfig, ProxyType
-from camoufox_pm.core.proxy_check import ProxyLocation, compare, preflight, proxy_url
+from phasmid_pm.core import proxy_check
+from phasmid_pm.core.models import BrowserSettings, ProxyConfig, ProxyType
+from phasmid_pm.core.proxy_check import ProxyLocation, compare, preflight, proxy_url
 
 TOKYO = ProxyLocation(
     ip="203.0.113.7",

@@ -9,9 +9,9 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from camoufox_pm.core import profile_manager as pm_module
-from camoufox_pm.core.models import Schedule, ScheduleRun, ScheduleRunOutcome
-from camoufox_pm.core.scheduler import TaskScheduler, next_run_after
+from phasmid_pm.core import profile_manager as pm_module
+from phasmid_pm.core.models import Schedule, ScheduleRun, ScheduleRunOutcome
+from phasmid_pm.core.scheduler import TaskScheduler, next_run_after
 
 MONDAY = datetime(2026, 8, 3, 10, 0)  # a known Monday, 10:00
 
@@ -383,7 +383,7 @@ async def test_an_existing_database_gains_the_schedule_tables(tmp_path):
     """An install from before schedules existed opens cleanly and keeps its data."""
     import sqlite3
 
-    from camoufox_pm.core.database import StorageManager
+    from phasmid_pm.core.database import StorageManager
 
     db_path = tmp_path / "old.db"
     connection = sqlite3.connect(db_path)

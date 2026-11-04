@@ -7,7 +7,7 @@ the user-agent and WebGL, so those are never hand-crafted here.
 
 import pytest
 
-from camoufox_pm.core.fingerprint_generator import FingerprintGenerator
+from phasmid_pm.core.fingerprint_generator import FingerprintGenerator
 
 
 @pytest.mark.asyncio

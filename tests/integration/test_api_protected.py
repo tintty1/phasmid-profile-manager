@@ -2,7 +2,7 @@
 
 import pytest
 
-from camoufox_pm.core.models import Profile
+from phasmid_pm.core.models import Profile
 
 
 async def make(client, **body):

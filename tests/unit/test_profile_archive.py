@@ -5,8 +5,8 @@ import zipfile
 
 import pytest
 
-from camoufox_pm.core import profile_archive
-from camoufox_pm.core.models import BrowserSettings, Profile, ProxyConfig, ProxyType
+from phasmid_pm.core import profile_archive
+from phasmid_pm.core.models import BrowserSettings, Profile, ProxyConfig, ProxyType
 
 
 def build_profile() -> Profile:

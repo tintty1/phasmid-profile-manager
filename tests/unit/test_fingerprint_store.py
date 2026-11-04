@@ -2,7 +2,7 @@
 
 import pytest
 
-from camoufox_pm.core import fingerprint_store
+from phasmid_pm.core import fingerprint_store
 
 RESOLVED = {
     # Hardware — must be frozen so the profile is the same machine every time.

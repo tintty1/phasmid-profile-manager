@@ -9,8 +9,8 @@ from unittest.mock import Mock
 
 import pytest
 
-from camoufox_pm.core import browser_install
-from camoufox_pm.core.browser_session import BrowserLaunchError
+from phasmid_pm.core import browser_install
+from phasmid_pm.core.browser_session import BrowserLaunchError
 
 
 @pytest.fixture

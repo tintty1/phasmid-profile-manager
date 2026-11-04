@@ -7,7 +7,7 @@ and [Russian guide](getting-started.ru.md) are the default entry points.
 ## Implemented in stage 1
 
 - A dedicated desktop entry point opens a native window without `--desktop`.
-  The existing `camoufox-pm` CLI remains available for source/web deployments.
+  The existing `phasmid-pm` CLI remains available for source/web deployments.
 - A writable OS data folder keeps the database, browser profiles and encryption
   key outside the application bundle. A fresh desktop install generates a key;
   an existing database with a missing key is not silently assigned a new one.

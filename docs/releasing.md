@@ -12,10 +12,10 @@ optional `release_tag` checks out that tag and attaches its installers.
 
 | Platform | Release asset | Builder |
 | --- | --- | --- |
-| macOS Apple Silicon | `camoufox-pm-macos-arm64.dmg` | `macos-15` ARM runner |
-| macOS Intel | `camoufox-pm-macos-x86_64.dmg` | `macos-15-intel` runner |
-| Windows x64 | `camoufox-pm-windows-x86_64-setup.exe` | Windows 2022 + NSIS |
-| Linux x64 | `camoufox-pm-linux-x86_64.deb` and `.tar.gz` | Ubuntu 22.04 + bundled Qt webview |
+| macOS Apple Silicon | `phasmid-pm-macos-arm64.dmg` | `macos-15` ARM runner |
+| macOS Intel | `phasmid-pm-macos-x86_64.dmg` | `macos-15-intel` runner |
+| Windows x64 | `phasmid-pm-windows-x86_64-setup.exe` | Windows 2022 + NSIS |
+| Linux x64 | `phasmid-pm-linux-x86_64.deb` and `.tar.gz` | Ubuntu 22.04 + bundled Qt webview |
 
 Each desktop asset has a same-name `.sha256` sidecar, computed after signing and
 notarization. Checksums detect file corruption; checksums downloaded from the
@@ -27,7 +27,7 @@ the official Microsoft WebView2 bootstrapper and verifies its Authenticode
 publisher before inclusion; NSIS installs that runtime if missing (requires
 internet). See [Microsoft’s deployment documentation](https://learn.microsoft.com/microsoft-edge/webview2/concepts/distribution). Uninstalling
 keeps the separate user data folder. Linux `.deb` installs the bundle in
-`/opt/camoufox-pm`, a launcher in `/usr/bin`, and an Applications entry; the
+`/opt/phasmid-pm`, a launcher in `/usr/bin`, and an Applications entry; the
 tarball keeps the complete runnable bundle for other layouts. Its runtime still
 needs compatible system graphics libraries. AppImage, Linux ARM, Windows ARM,
 and full automatic app replacement are not shipped.
@@ -43,7 +43,7 @@ and full automatic app replacement are not shipped.
    Build on each target platform; PyInstaller is not a cross compiler. Linux also
    needs `PyQt6`, `PyQt6-WebEngine`, `qtpy`, `dpkg-deb` and the shared libraries
    declared in the generated Debian control file. Windows needs NSIS (`makensis`).
-3. Install the wheel in a clean environment, run `camoufox-pm --no-browser`,
+3. Install the wheel in a clean environment, run `phasmid-pm --no-browser`,
    and confirm `/health` reports the release version. The frozen build also copies
    package metadata so its version is available to update checks.
 4. Download workflow artifacts and install them on real target systems. Verify
@@ -92,16 +92,16 @@ security prompts. Keep archives and `secret.key` outside the installation folder
 
 PyPI publishing is off by default. Set repository variable `PUBLISH_TO_PYPI=true`
 and configure a PyPI Trusted Publisher for owner `polyackiy`, repository
-`camoufox-profile-manager`, workflow `release.yml`, environment `pypi`. Create
+`phasmid-profile-manager`, workflow `release.yml`, environment `pypi`. Create
 that GitHub environment before enabling publishing. The release workflow uses
 OIDC rather than a PyPI API token. Desktop installation does not require PyPI.
 
 ## Current public tracking
 
-- [0.6.0 stable-release readiness](https://github.com/polyackiy/camoufox-profile-manager/milestone/1)
-- [Signing and notarization #61](https://github.com/polyackiy/camoufox-profile-manager/issues/61)
-- [Clean-system acceptance #62](https://github.com/polyackiy/camoufox-profile-manager/issues/62)
-- [Verified automatic updates #63](https://github.com/polyackiy/camoufox-profile-manager/issues/63) (later work)
+- [0.6.0 stable-release readiness](https://github.com/tintty1/phasmid-profile-manager/milestone/1)
+- [Signing and notarization #61](https://github.com/tintty1/phasmid-profile-manager/issues/61)
+- [Clean-system acceptance #62](https://github.com/tintty1/phasmid-profile-manager/issues/62)
+- [Verified automatic updates #63](https://github.com/tintty1/phasmid-profile-manager/issues/63) (later work)
 
 Prerelease tags are excluded from the optional PyPI publish job. The application's
 stable update checker also intentionally excludes prereleases; preview testers

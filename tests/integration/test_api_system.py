@@ -4,10 +4,10 @@ import shutil
 
 import pytest
 
-from camoufox_pm.api import dependencies
-from camoufox_pm.api.dependencies import get_profile_manager
-from camoufox_pm.config import get_settings
-from camoufox_pm.core.browser_session import BrowserSession
+from phasmid_pm.api import dependencies
+from phasmid_pm.api.dependencies import get_profile_manager
+from phasmid_pm.config import get_settings
+from phasmid_pm.core.browser_session import BrowserSession
 
 
 class FakeCamoufox:
@@ -30,7 +30,7 @@ def storage_dir(client, tmp_path, monkeypatch):
     cwd = tmp_path / "cwd"
     cwd.mkdir()
     monkeypatch.chdir(cwd)
-    monkeypatch.setenv("CPM_DB_PATH", str(tmp_path / "api.db"))
+    monkeypatch.setenv("PPM_DB_PATH", str(tmp_path / "api.db"))
     get_settings.cache_clear()
     yield tmp_path
     get_settings.cache_clear()
@@ -164,8 +164,8 @@ async def test_the_config_endpoint_reports_secrets_as_set_but_never_their_values
 ):
     """The Settings screen has to show whether encryption and the key are on.
     Reporting them means serving both secrets to anyone who reaches the API."""
-    monkeypatch.setenv("CPM_API_KEY", "top-secret-key")
-    monkeypatch.setenv("CPM_SECRET_KEY", "top-secret-encryption")
+    monkeypatch.setenv("PPM_API_KEY", "top-secret-key")
+    monkeypatch.setenv("PPM_SECRET_KEY", "top-secret-encryption")
     get_settings.cache_clear()
     try:
         response = await client.get("/api/system/config", headers={"X-API-Key": "top-secret-key"})

@@ -18,7 +18,7 @@ interface BrowserViewerProps {
 function keyProtocol(key: string): string {
   const bytes = new TextEncoder().encode(key)
   const base64 = btoa(String.fromCharCode(...bytes))
-  return `cpm-key.${base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')}`
+  return `ppm-key.${base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')}`
 }
 
 /**

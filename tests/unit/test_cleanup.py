@@ -8,7 +8,7 @@ import shutil
 
 import pytest
 
-from camoufox_pm.core.cleanup import ProfileCleanupManager
+from phasmid_pm.core.cleanup import ProfileCleanupManager
 
 
 @pytest.fixture
@@ -207,7 +207,7 @@ async def test_a_fresh_install_with_no_profiles_directory_is_not_an_error(tmp_pa
 async def test_it_reads_the_database_it_was_given(profile_manager, tmp_path):
     """Regression: the database was assumed to be ``<data_dir>/profiles.db``.
 
-    Any other configured file name (``CPM_DB_PATH=data/mine.db``) meant the
+    Any other configured file name (``PPM_DB_PATH=data/mine.db``) meant the
     cleanup opened an empty database beside the real one, found no profiles in
     it, and so considered every directory on disk orphaned.
     """

@@ -1,6 +1,6 @@
-# Camoufox Profile Manager
+# Phasmid Profile Manager
 
-[![CI](https://github.com/polyackiy/camoufox-profile-manager/actions/workflows/ci.yml/badge.svg)](https://github.com/polyackiy/camoufox-profile-manager/actions/workflows/ci.yml)
+[![CI](https://github.com/tintty1/phasmid-profile-manager/actions/workflows/ci.yml/badge.svg)](https://github.com/tintty1/phasmid-profile-manager/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![Camoufox](https://img.shields.io/badge/browser-Camoufox-orange.svg)](https://github.com/daijro/camoufox)
@@ -13,12 +13,12 @@ Each profile is **one long-lived machine**. It keeps the same fingerprint every
 session, along with its own cookies, storage and history, so an account opened
 from it in January still looks like the same computer in June.
 
-> **Desktop preview:** [download v0.6.0-rc.1](https://github.com/polyackiy/camoufox-profile-manager/releases/tag/v0.6.0-rc.1) from **Assets**. macOS
+> **Desktop preview:** [download v0.6.0-rc.1](https://github.com/tintty1/phasmid-profile-manager/releases/tag/v0.6.0-rc.1) from **Assets**. macOS
 > Apple Silicon and Intel, Windows x64, and Ubuntu/Debian x64 builds are produced
 > by CI. Signing is conditional; unsigned builds can show OS security warnings.
 > See [Getting started](docs/getting-started.md) / [Начало работы](docs/getting-started.ru.md).
 > Cross-platform installer and signing validation is still in progress; see
-> [release milestone](https://github.com/polyackiy/camoufox-profile-manager/milestone/1). Chrome migration remains experimental.
+> [release milestone](https://github.com/tintty1/phasmid-profile-manager/milestone/1). Chrome migration remains experimental.
 
 ![The profiles list](docs/assets/screenshot-profiles.png)
 
@@ -41,15 +41,15 @@ from it in January still looks like the same computer in June.
   browser version current automatically. Hardware never rotates on a timer, on
   purpose — [docs/scheduling.md](docs/scheduling.md).
 - **Proxies, checked before you trust them.** HTTP, HTTPS and SOCKS, with
-  passwords encrypted at rest when `CPM_SECRET_KEY` is set. *Check proxy* reports
+  passwords encrypted at rest when `PPM_SECRET_KEY` is set. *Check proxy* reports
   where the proxy really comes out and whether the profile agrees with it — a
   timezone on a different clock from the exit country is the kind of
   contradiction a page can measure in two lines of JavaScript. The answer stays
   in the profiles list — exit address, country and latency under the proxy, green
   or amber or red — and a selection can be checked in one go.
 - **Multi-user, when you need it.** Nothing to configure for the usual case: the
-  app binds to loopback and is open. Set `CPM_API_KEY` for machine clients, or
-  create an account (`camoufox-pm user add`) and humans get a login screen —
+  app binds to loopback and is open. Set `PPM_API_KEY` for machine clients, or
+  create an account (`phasmid-pm user add`) and humans get a login screen —
   argon2id hashes, HttpOnly session cookies, a logout that really invalidates.
 - **Move a profile anywhere.** Export a profile with its fingerprint *and* its
   browser data into one archive, and import it on another machine.
@@ -88,17 +88,17 @@ of plausible parts.
 
 ### Desktop app — recommended
 
-1. Open [Releases](https://github.com/polyackiy/camoufox-profile-manager/releases)
+1. Open [Releases](https://github.com/tintty1/phasmid-profile-manager/releases)
    and choose the installer in **Assets** for your computer:
 
    | Computer | Download |
    | --- | --- |
-   | Mac, Apple Silicon (M1 or newer) | `camoufox-pm-macos-arm64.dmg` |
-   | Mac, Intel | `camoufox-pm-macos-x86_64.dmg` |
-   | Windows 10/11, Intel/AMD 64-bit | `camoufox-pm-windows-x86_64-setup.exe` |
-   | Ubuntu 22.04+/compatible Debian, Intel/AMD 64-bit | `camoufox-pm-linux-x86_64.deb` |
+   | Mac, Apple Silicon (M1 or newer) | `phasmid-pm-macos-arm64.dmg` |
+   | Mac, Intel | `phasmid-pm-macos-x86_64.dmg` |
+   | Windows 10/11, Intel/AMD 64-bit | `phasmid-pm-windows-x86_64-setup.exe` |
+   | Ubuntu 22.04+/compatible Debian, Intel/AMD 64-bit | `phasmid-pm-linux-x86_64.deb` |
 
-2. Install and open **Camoufox Profile Manager**. You do not need Python, Node.js
+2. Install and open **Phasmid Profile Manager**. You do not need Python, Node.js
    or a terminal. On Mac, drag the app into Applications first.
 3. Click **Install browser** in the app, wait for the download, and create your
    first profile. The app shows progress and provides a retry if installation fails.
@@ -113,14 +113,14 @@ backups, Trash, updates, and where your data lives.
 Install [uv](https://docs.astral.sh/uv/) and Node.js 20.9+; uv manages Python.
 
 ```bash
-git clone https://github.com/polyackiy/camoufox-profile-manager.git
-cd camoufox-profile-manager
+git clone https://github.com/tintty1/phasmid-profile-manager.git
+cd phasmid-profile-manager
 uv sync --extra desktop
 uv run python scripts/build_webui.py
-uv run python -m camoufox_pm.desktop
+uv run python -m phasmid_pm.desktop
 ```
 
-To use a browser tab instead of a desktop window, run `uv run camoufox-pm`.
+To use a browser tab instead of a desktop window, run `uv run phasmid-pm`.
 This CLI keeps the existing `data/profiles.db` path by default. The desktop
 launcher uses a persistent OS data folder. See [CLI options](docs/cli.md).
 On Linux, source desktop mode needs a supported pywebview GUI backend and system
@@ -139,7 +139,7 @@ docker compose up      # then open http://localhost:8000
 One container serving the API and the UI on one port, like every other way of
 running it. The port is published on loopback only.
 
-Each browser launched in the container gets its own VNC display (`CPM_VNC=1`).
+Each browser launched in the container gets its own VNC display (`PPM_VNC=1`).
 It opens in a viewer in the web UI, where you can see and use it; the monitor
 button on a running profile reopens it. On a Linux Wayland desktop you can also
 open the windows on your own screen with `docker-compose.desktop.yml` (see the
@@ -168,21 +168,21 @@ an installer; replacing the app remains a manual installation step.
 ## Configuration
 
 The desktop app creates its data folder and encryption key automatically.
-Advanced/source configuration uses environment variables (prefix `CPM_`); copy
+Advanced/source configuration uses environment variables (prefix `PPM_`); copy
 `.env.example` to `.env` if needed. Explicit configuration also overrides desktop defaults.
 
 | Variable           | Default                 | Description                                     |
 | ------------------ | ----------------------- | ----------------------------------------------- |
-| `CPM_HOST`         | `127.0.0.1`             | Bind address                                    |
-| `CPM_PORT`         | `8000`                  | Port                                            |
-| `CPM_DB_PATH`      | `data/profiles.db` (CLI) | SQLite database path; desktop uses the OS data folder                            |
-| `CPM_LEASE_TTL`    | `120`                   | Seconds a profile's lease survives without a heartbeat — how long a crashed instance keeps its profiles locked. Minimum 60 |
-| `CPM_SECRET_KEY`   | *(empty)*               | Fernet key; encrypts proxy passwords at rest    |
-| `CPM_API_KEY`      | *(empty)*               | If set, required as the `X-API-Key` header (machine clients) |
-| `CPM_SESSION_TTL_HOURS` | `168`              | Login session lifetime, in hours                |
-| `CPM_SECURE_COOKIES` | `0`                   | Force the session cookie's `Secure` flag (set behind a TLS proxy) |
-| `CPM_CORS_ORIGINS` | `http://localhost:3000` | Comma-separated allowed origins                 |
-| `CPM_WEBUI_DIR`    | *(auto)*                | Override where the bundled web UI is served from |
+| `PPM_HOST`         | `127.0.0.1`             | Bind address                                    |
+| `PPM_PORT`         | `8000`                  | Port                                            |
+| `PPM_DB_PATH`      | `data/profiles.db` (CLI) | SQLite database path; desktop uses the OS data folder                            |
+| `PPM_LEASE_TTL`    | `120`                   | Seconds a profile's lease survives without a heartbeat — how long a crashed instance keeps its profiles locked. Minimum 60 |
+| `PPM_SECRET_KEY`   | *(empty)*               | Fernet key; encrypts proxy passwords at rest    |
+| `PPM_API_KEY`      | *(empty)*               | If set, required as the `X-API-Key` header (machine clients) |
+| `PPM_SESSION_TTL_HOURS` | `168`              | Login session lifetime, in hours                |
+| `PPM_SECURE_COOKIES` | `0`                   | Force the session cookie's `Secure` flag (set behind a TLS proxy) |
+| `PPM_CORS_ORIGINS` | `http://localhost:3000` | Comma-separated allowed origins                 |
+| `PPM_WEBUI_DIR`    | *(auto)*                | Override where the bundled web UI is served from |
 
 Generate an encryption key with:
 
@@ -190,7 +190,7 @@ Generate an encryption key with:
 uv run python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 ```
 
-User accounts for the web UI are managed from the CLI: `camoufox-pm user add
+User accounts for the web UI are managed from the CLI: `phasmid-pm user add
 <name>` creates one, and from then on the API and UI require a login (see
 [SECURITY.md](SECURITY.md#authentication)).
 
@@ -204,12 +204,12 @@ correlation a profile exists to avoid.
 
 Each launch therefore takes a **lease** on the profile, and a second instance is
 refused (`409` over the API) until the browser closes. A lease is renewed while
-the browser runs and expires `CPM_LEASE_TTL` seconds after an instance stops
+the browser runs and expires `PPM_LEASE_TTL` seconds after an instance stops
 renewing, so a machine that died does not lock its profiles forever.
 
 ```bash
-camoufox-pm leases          # who holds what
-camoufox-pm unlock <id>     # force-release, after checking the holder is gone
+phasmid-pm leases          # who holds what
+phasmid-pm unlock <id>     # force-release, after checking the holder is gone
 ```
 
 Force-release is CLI-only by design: it is the one operation that can put two
@@ -265,9 +265,9 @@ it. See [CHANGELOG.md](CHANGELOG.md).
 ## Architecture
 
 ```
-src/camoufox_pm/
+src/phasmid_pm/
 ├── main.py             FastAPI app; serves the API and the bundled UI
-├── cli.py              the camoufox-pm command, including user accounts
+├── cli.py              the phasmid-pm command, including user accounts
 ├── config.py           environment-based settings
 ├── core/
 │   ├── models.py            profiles, groups, browser settings, schedules
@@ -296,7 +296,7 @@ extras/chrome_migration/  optional Chrome → Camoufox migration
 ```bash
 uv sync --extra dev
 uv run ruff check src tests
-uv run mypy src/camoufox_pm
+uv run mypy src/phasmid_pm
 uv run pytest -m "not browser"    # fast suite
 uv run pytest -m browser          # launches a real browser, needs `camoufox fetch`
 ```
@@ -312,7 +312,7 @@ that would otherwise be against a service's rules acceptable.
 
 ## License
 
-[MIT](LICENSE) © Camoufox Profile Manager Contributors.
+[MIT](LICENSE) © Phasmid Profile Manager Contributors.
 
 Built on [Camoufox](https://github.com/daijro/camoufox) by daijro.
 

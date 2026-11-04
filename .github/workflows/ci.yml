@@ -32,7 +32,7 @@ jobs:
       - name: Format
         run: uv run ruff format --check src tests
       - name: Type-check
-        run: uv run mypy src/camoufox_pm
+        run: uv run mypy src/phasmid_pm
       - name: Test
         run: uv run pytest -m "not browser" --cov --cov-report=term-missing
 

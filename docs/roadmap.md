@@ -1,7 +1,7 @@
 # Roadmap
 
 This is a rough, non-binding plan. Priorities may change based on feedback.
-Track progress in [GitHub Issues](https://github.com/polyackiy/camoufox-profile-manager/issues).
+Track progress in [GitHub Issues](https://github.com/tintty1/phasmid-profile-manager/issues).
 
 ## Desktop adoption — current implementation
 
@@ -76,7 +76,7 @@ replacement remains separate from the implemented backup/download update flow.
   in bulk are under test, and the six bugs that turned up in doing it are fixed.
   What is deliberately left uncovered, and why, is written down in
   [CONTRIBUTING.md](../CONTRIBUTING.md#what-is-deliberately-not-covered).
-- Authentication beyond the API key: user accounts (`camoufox-pm user add`),
+- Authentication beyond the API key: user accounts (`phasmid-pm user add`),
   argon2id password hashes, HttpOnly session cookies with a real server-side
   logout, and a login screen in the web UI. The three states stay coherent —
   nothing configured is as open as before (loopback), the API key keeps

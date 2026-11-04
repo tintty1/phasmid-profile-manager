@@ -353,7 +353,7 @@ export default function SchedulesPage() {
       <Modal
         open={formOpen}
         title={editing ? 'Edit schedule' : 'New schedule'}
-        subtitle="Times are read on the server's clock — the machine running camoufox-pm."
+        subtitle="Times are read on the server's clock — the machine running phasmid-pm."
         onClose={() => setFormOpen(false)}
         width={480}
         footer={

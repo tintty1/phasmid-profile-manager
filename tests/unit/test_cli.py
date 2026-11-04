@@ -11,8 +11,8 @@ import sys
 
 import pytest
 
-from camoufox_pm import cli
-from camoufox_pm.config import get_settings
+from phasmid_pm import cli
+from phasmid_pm.config import get_settings
 
 
 @pytest.fixture
@@ -33,11 +33,11 @@ def run(monkeypatch):
 
     # main() writes these itself; setting them through monkeypatch first means
     # the originals are restored however the run ends.
-    monkeypatch.setenv("CPM_HOST", "127.0.0.1")
-    monkeypatch.setenv("CPM_PORT", "8000")
+    monkeypatch.setenv("PPM_HOST", "127.0.0.1")
+    monkeypatch.setenv("PPM_PORT", "8000")
 
     def invoke(*args: str):
-        monkeypatch.setattr(sys, "argv", ["camoufox-pm", *args])
+        monkeypatch.setattr(sys, "argv", ["phasmid-pm", *args])
         get_settings.cache_clear()
         cli.main()
         return started
@@ -84,7 +84,7 @@ def test_a_real_address_is_opened_as_itself(run):
 
 def test_desktop_mode_hands_over_instead_of_serving_here(run, monkeypatch):
     """run_desktop starts its own server; starting a second one would take the port."""
-    from camoufox_pm import desktop
+    from phasmid_pm import desktop
 
     asked: list[dict] = []
     monkeypatch.setattr(desktop, "run_desktop", lambda **kw: asked.append(kw))
@@ -96,7 +96,7 @@ def test_desktop_mode_hands_over_instead_of_serving_here(run, monkeypatch):
     assert started["timers"] == []
 
 
-# --- `camoufox-pm user ...` ---------------------------------------------------
+# --- `phasmid-pm user ...` ---------------------------------------------------
 
 
 @pytest.fixture
@@ -104,13 +104,13 @@ def run_user(monkeypatch, tmp_path):
     """Run a ``user`` subcommand against a throwaway database, with password
     prompts answered from a scripted list."""
 
-    monkeypatch.setenv("CPM_DB_PATH", str(tmp_path / "cli.db"))
+    monkeypatch.setenv("PPM_DB_PATH", str(tmp_path / "cli.db"))
     monkeypatch.setattr(cli.uvicorn, "run", lambda *a, **k: pytest.fail("must not serve"))
 
     def invoke(*args: str, prompts: list[str] | None = None):
         answers = list(prompts or [])
         monkeypatch.setattr(cli.getpass, "getpass", lambda prompt="": answers.pop(0))
-        monkeypatch.setattr(sys, "argv", ["camoufox-pm", "user", *args])
+        monkeypatch.setattr(sys, "argv", ["phasmid-pm", "user", *args])
         get_settings.cache_clear()
         try:
             cli.main()
@@ -121,7 +121,7 @@ def run_user(monkeypatch, tmp_path):
 
 
 async def _usernames(tmp_path) -> list[str]:
-    from camoufox_pm.core.database import StorageManager
+    from phasmid_pm.core.database import StorageManager
 
     storage = StorageManager(str(tmp_path / "cli.db"))
     await storage.initialize()
@@ -173,8 +173,8 @@ def test_user_list_shows_names_and_never_hashes(run_user, capsys):
 
 
 def test_user_passwd_changes_the_password(run_user, tmp_path):
-    from camoufox_pm.core import auth
-    from camoufox_pm.core.database import StorageManager
+    from phasmid_pm.core import auth
+    from phasmid_pm.core.database import StorageManager
 
     run_user("add", "alice", prompts=["hunter22-long", "hunter22-long"])
     run_user("passwd", "alice", prompts=["new-password-9", "new-password-9"])

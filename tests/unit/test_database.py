@@ -5,8 +5,8 @@ import json
 import pytest
 from cryptography.fernet import Fernet
 
-from camoufox_pm.config import get_settings
-from camoufox_pm.core.models import Profile, ProfileStatus, ProxyConfig, ProxyType
+from phasmid_pm.config import get_settings
+from phasmid_pm.core.models import Profile, ProfileStatus, ProxyConfig, ProxyType
 
 
 @pytest.mark.asyncio
@@ -96,7 +96,7 @@ async def test_proxy_password_roundtrips_through_storage(storage):
 @pytest.mark.asyncio
 async def test_proxy_password_is_encrypted_at_rest(storage, monkeypatch):
     """With a key configured, the password must be ciphertext on disk, not plaintext."""
-    monkeypatch.setenv("CPM_SECRET_KEY", Fernet.generate_key().decode())
+    monkeypatch.setenv("PPM_SECRET_KEY", Fernet.generate_key().decode())
     get_settings.cache_clear()
     try:
         profile = Profile(
@@ -126,7 +126,7 @@ async def test_a_pre_auth_database_gains_the_user_tables_without_losing_data(tmp
     it must add them and leave the existing rows exactly as they were."""
     import sqlite3
 
-    from camoufox_pm.core.database import StorageManager
+    from phasmid_pm.core.database import StorageManager
 
     db_path = tmp_path / "old.db"
     old = sqlite3.connect(str(db_path))
@@ -174,7 +174,7 @@ async def test_a_database_from_before_protection_upgrades_with_nothing_protected
     """Upgrading adds the column; no existing profile becomes protected by it."""
     import sqlite3
 
-    from camoufox_pm.core.database import StorageManager
+    from phasmid_pm.core.database import StorageManager
 
     path = tmp_path / "old.db"
     old = sqlite3.connect(path)

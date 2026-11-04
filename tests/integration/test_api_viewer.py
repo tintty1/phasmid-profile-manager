@@ -11,8 +11,8 @@ import pytest
 from starlette.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
-from camoufox_pm.api.routes import viewer
-from camoufox_pm.main import app
+from phasmid_pm.api.routes import viewer
+from phasmid_pm.main import app
 
 URL = "/api/v1/profiles/p1/vnc"
 
@@ -61,7 +61,7 @@ def test_relays_bytes_both_ways(relay):
 
 
 def test_key_subprotocol_is_never_echoed(relay):
-    with TestClient(app).websocket_connect(URL, subprotocols=["binary", "cpm-key.c2VjcmV0"]) as ws:
+    with TestClient(app).websocket_connect(URL, subprotocols=["binary", "ppm-key.c2VjcmV0"]) as ws:
         assert ws.accepted_subprotocol == "binary"
 
 

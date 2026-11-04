@@ -4,9 +4,9 @@ from datetime import datetime
 
 import pytest
 
-from camoufox_pm.api.dependencies import get_profile_manager
-from camoufox_pm.core import fingerprint_store
-from camoufox_pm.core.models import UsageStats
+from phasmid_pm.api.dependencies import get_profile_manager
+from phasmid_pm.core import fingerprint_store
+from phasmid_pm.core.models import UsageStats
 
 
 @pytest.mark.asyncio
@@ -214,7 +214,7 @@ async def test_a_profile_round_trips_through_an_archive(client):
 @pytest.mark.asyncio
 async def test_importing_a_pinned_profile_keeps_the_machine(client):
     """The point of the archive: the same identity comes back."""
-    from camoufox_pm.api.dependencies import get_profile_manager
+    from phasmid_pm.api.dependencies import get_profile_manager
 
     created = await client.post("/api/profiles", json={"name": "pinned-export"})
     manager = get_profile_manager()
@@ -369,8 +369,8 @@ async def test_a_preset_that_cannot_be_pinned_creates_nothing(client, monkeypatc
 @pytest.mark.asyncio
 async def test_a_refused_import_leaves_nothing_behind(client, monkeypatch):
     """A rejected archive must not strand a profile directory nobody can see."""
-    from camoufox_pm.api.dependencies import get_profile_manager
-    from camoufox_pm.core import profile_archive
+    from phasmid_pm.api.dependencies import get_profile_manager
+    from phasmid_pm.core import profile_archive
 
     manager = get_profile_manager()
     profiles_dir = manager.profiles_dir
@@ -420,7 +420,7 @@ async def test_refresh_browser_version_keeps_the_machine(client, monkeypatch):
     ``resolve`` is stubbed so this covers the wiring without needing the browser
     binary; ``tests/browser`` exercises it against a real Camoufox.
     """
-    from camoufox_pm.api.dependencies import get_profile_manager
+    from phasmid_pm.api.dependencies import get_profile_manager
 
     # A newly resolved fingerprint describes a completely different machine.
     monkeypatch.setattr(
@@ -489,7 +489,7 @@ WINDOWS_PIN = {
 
 async def _pinned_windows_profile_set_to(client, os_name: str) -> str:
     """A profile whose pin says Windows while its setting says something else."""
-    from camoufox_pm.api.dependencies import get_profile_manager
+    from phasmid_pm.api.dependencies import get_profile_manager
 
     created = await client.post("/api/profiles", json={"name": f"drifted-{os_name}"})
     profile_id = created.json()["id"]
@@ -517,7 +517,7 @@ async def test_a_setting_that_disagrees_with_the_pin_is_reported(client):
 @pytest.mark.asyncio
 async def test_keeping_the_machine_moves_the_setting_and_nothing_else(client):
     """The cheap way out: the profile is the computer it has always been."""
-    from camoufox_pm.api.dependencies import get_profile_manager
+    from phasmid_pm.api.dependencies import get_profile_manager
 
     profile_id = await _pinned_windows_profile_set_to(client, "macos")
 
@@ -536,7 +536,7 @@ async def test_keeping_the_machine_moves_the_setting_and_nothing_else(client):
 @pytest.mark.asyncio
 async def test_keeping_the_setting_pins_a_machine_for_it(client, monkeypatch):
     """The expensive way out: new hardware, resolved for the OS that was chosen."""
-    from camoufox_pm.api.dependencies import get_profile_manager
+    from phasmid_pm.api.dependencies import get_profile_manager
 
     asked_for: dict = {}
 
@@ -598,7 +598,7 @@ async def test_reconciling_needs_a_pin_and_a_profile(client):
 @pytest.mark.asyncio
 async def test_clear_geography_hands_the_location_back_to_the_proxy(client):
     """A profile from before geography followed the proxy can be freed to do so."""
-    from camoufox_pm.api.dependencies import get_profile_manager
+    from phasmid_pm.api.dependencies import get_profile_manager
 
     old = await client.post(
         "/api/profiles",
@@ -679,7 +679,7 @@ async def test_fingerprint_is_absent_until_the_first_launch(client):
 @pytest.mark.asyncio
 async def test_regenerating_drops_the_pinned_machine(client):
     """Otherwise the profile would keep its old hardware forever."""
-    from camoufox_pm.api.dependencies import get_profile_manager
+    from phasmid_pm.api.dependencies import get_profile_manager
 
     created = await client.post("/api/profiles", json={"name": "repin"})
     profile_id = created.json()["id"]

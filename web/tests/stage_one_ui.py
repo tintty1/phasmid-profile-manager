@@ -81,9 +81,9 @@ class DesktopUI(unittest.TestCase):
             self.browser_state = {**self.browser_state, "state": "downloading", "progress": 35, "message": "Downloading browser"}
             data, envelope = self.browser_state, True
         elif path == "/system/updates":
-            data, envelope = {"current_version": "0.5.0", "latest_version": "0.6.0", "available": True, "release_url": "https://github.com/polyackiy/camoufox-profile-manager/releases/tag/v0.6.0", "assets": []}, True
+            data, envelope = {"current_version": "0.5.0", "latest_version": "0.6.0", "available": True, "release_url": "https://github.com/tintty1/phasmid-profile-manager/releases/tag/v0.6.0", "assets": []}, True
         elif path == "/system/updates/prepare":
-            data, envelope = {"release_url": "https://github.com/polyackiy/camoufox-profile-manager/releases/tag/v0.6.0", "backup_count": 1, "message": "1 backup created. Release ready."}, True
+            data, envelope = {"release_url": "https://github.com/tintty1/phasmid-profile-manager/releases/tag/v0.6.0", "backup_count": 1, "message": "1 backup created. Release ready."}, True
         elif path == "/system/backups":
             data, envelope = {"backups": self.backups}, True
         elif path.startswith("/system/backups/") and path.endswith("/restore"):
@@ -129,7 +129,7 @@ class DesktopUI(unittest.TestCase):
         expect(self.page.get_by_text("Version 0.6.0 is available. You have 0.5.0.")).to_be_visible()
         expect(self.page.get_by_role("link", name="Open release downloads")).not_to_be_visible()
         self.page.get_by_role("button", name="Back up and prepare update").click()
-        expect(self.page.get_by_role("link", name="Open release downloads")).to_have_attribute("href", "https://github.com/polyackiy/camoufox-profile-manager/releases/tag/v0.6.0")
+        expect(self.page.get_by_role("link", name="Open release downloads")).to_have_attribute("href", "https://github.com/tintty1/phasmid-profile-manager/releases/tag/v0.6.0")
         self.assertEqual(sum(path == "/system/updates/prepare" for _, path, _ in self.calls), 1)
 
     def test_backup_restore_creates_a_separate_profile(self):

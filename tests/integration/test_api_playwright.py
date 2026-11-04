@@ -13,8 +13,8 @@ from starlette.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 from websockets.asyncio.server import serve
 
-from camoufox_pm.api.routes import automation
-from camoufox_pm.main import app
+from phasmid_pm.api.routes import automation
+from phasmid_pm.main import app
 
 URL = "/api/v1/profiles/p1/playwright"
 

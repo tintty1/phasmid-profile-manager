@@ -263,7 +263,7 @@ config.ini
 .ruff_cache/
 
 # Generated web UI bundle (built by scripts/build_webui.py)
-src/camoufox_pm/webui/
+src/phasmid_pm/webui/
 
 # Keep the committed PyInstaller spec
 !packaging/*.spec

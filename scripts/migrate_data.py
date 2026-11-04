@@ -11,8 +11,8 @@ import traceback
 
 from loguru import logger
 
-from camoufox_pm.core.database import StorageManager
-from camoufox_pm.core.profile_manager import ProfileManager
+from phasmid_pm.core.database import StorageManager
+from phasmid_pm.core.profile_manager import ProfileManager
 
 
 async def migrate_data() -> None:

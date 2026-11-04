@@ -6,19 +6,19 @@
 #
 # The port is published to loopback (127.0.0.1) only, because the app is open by
 # default. Before exposing it beyond this host, create a user account
-# (`docker compose exec app uv run camoufox-pm user add <name>`) or set
-# CPM_API_KEY, and set CPM_SECRET_KEY to encrypt proxy passwords at rest.
+# (`docker compose exec app uv run phasmid-pm user add <name>`) or set
+# PPM_API_KEY, and set PPM_SECRET_KEY to encrypt proxy passwords at rest.
 services:
   app:
     build: .
     # environment:
-    # CPM_API_KEY: "change-me"
-    # CPM_SECRET_KEY: "generate-with-fernet"
+    # PPM_API_KEY: "change-me"
+    # PPM_SECRET_KEY: "generate-with-fernet"
     # Set when a TLS-terminating proxy sits in front, so the session cookie
     # keeps its Secure flag even though this process sees plain HTTP.
-    # CPM_SECURE_COOKIES: "1"
+    # PPM_SECURE_COOKIES: "1"
     volumes:
-      - cpm-data:/data
+      - ppm-data:/data
       # The downloaded Camoufox browser, kept so a rebuild doesn't re-download it.
       - camoufox-cache:/root/.cache/camoufox
     ports:
@@ -30,5 +30,5 @@ services:
     restart: unless-stopped
 
 volumes:
-  cpm-data:
+  ppm-data:
   camoufox-cache:

@@ -1,0 +1,19 @@
+{
+  "skill_name": "phasmid-profile-manager",
+  "evals": [
+    {
+      "id": 1,
+      "name": "cookie-persistence",
+      "prompt": "The Camoufox profile manager is running at http://127.0.0.1:8000. Create a Windows profile called {NAME}, open it headless and drive it with Playwright: visit https://httpbin.org/cookies/set?session=abc123, then disconnect. Open the same profile again in a second, separate Playwright session and check whether httpbin.org/cookies still shows session=abc123. Report the result, then clean up: stop the browser and move the profile to the trash.",
+      "expected_output": "A report showing the cookie survived across two Playwright sessions on the same profile, with the browser stopped and the profile in Trash afterwards.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "name": "watchable-handoff",
+      "prompt": "I'll need to solve a captcha by hand later. Using the profile manager on localhost:8000, make sure a profile named {NAME} exists (create it if it doesn't), open it in a way that lets me watch and take over the browser from the manager's web UI, and use Playwright to navigate it to https://example.org. Leave it running and tell me exactly how I take over.",
+      "expected_output": "Profile launched in virtual mode, navigated to example.org via Playwright, left running, with instructions to open the web UI and use the viewer (monitor) button.",
+      "files": []
+    }
+  ]
+}

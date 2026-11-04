@@ -8,7 +8,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 - Browsers launched in Docker open in a VNC viewer in the web UI. Each profile
-  gets its own display (`CPM_VNC=1`, on in the image), reached only through an
+  gets its own display (`PPM_VNC=1`, on in the image), reached only through an
   authenticated WebSocket. `docker-compose.desktop.yml` shows the windows on a
   Linux desktop instead.
 - Agents and scripts can drive any running profile with Playwright. Launch
@@ -16,7 +16,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   API's port and auth, so it works from Docker too. A client's `close()` only
   disconnects; the profile keeps running.
 - Launch takes a `mode` — `headless`, `virtual` (own VNC display) or `window`
-  (the desktop) — so one instance serves all three. `CPM_VNC` now only sets the
+  (the desktop) — so one instance serves all three. `PPM_VNC` now only sets the
   default for headed launches.
 - In the web UI, the arrow beside Run picks the mode; modes this server cannot
   offer are shown disabled with the reason. A running profile shows its mode,
@@ -89,11 +89,11 @@ with a PostgreSQL backend attached; the locking half landed first and on its own
   browsers means one cookie jar written from two places and the same account
   live from two IPs. Every launch now takes a row-level lease on the profile;
   a second instance is refused with `409` until the browser closes. The lease is
-  renewed while the browser runs and expires `CPM_LEASE_TTL` seconds (default
+  renewed while the browser runs and expires `PPM_LEASE_TTL` seconds (default
   120, minimum 60) after an instance stops renewing, so a machine that died does
   not lock its profiles forever. Exporting a profile leased elsewhere is refused
   the same way: the archive would be copied mid-write.
-- **`camoufox-pm leases` and `camoufox-pm unlock <id>`** show who holds what and
+- **`phasmid-pm leases` and `phasmid-pm unlock <id>`** show who holds what and
   force-release a lease. CLI-only on purpose — force-release is the one
   operation that can put two browsers on one identity, so it takes shell access
   to the host rather than a button in the UI.
@@ -152,7 +152,7 @@ question that turned out to be what the tests were getting wrong.
   back to the auto-focused Name field. Typing a proxy password put the rest of it
   into the profile's name. Reported and fixed by
   [@catorch](https://github.com/catorch) in
-  [#45](https://github.com/polyackiy/camoufox-profile-manager/pull/45); measured
+  [#45](https://github.com/tintty1/phasmid-profile-manager/pull/45); measured
   before and after by watching `document.activeElement` across two poll cycles.
 - **A pinned machine now decides every property that names the operating
   system.** Camoufox builds a fingerprint from a device preset without
@@ -316,20 +316,20 @@ hardware on a timer because that would undo the whole point.
 ### Added
 - **User accounts and login, for deployments more than one person can reach.**
   The API key stays what it was — one shared machine secret — and humans now
-  get their own path: `camoufox-pm user add <name>` creates an account
+  get their own path: `phasmid-pm user add <name>` creates an account
   (password prompted, argon2id-hashed, never in argv or logs), and from the
   moment any account exists the API requires a login session or the API key.
   The web UI grows a login screen and a logout control. Sessions are opaque
   random tokens stored server-side as SHA-256 — the cookie is HttpOnly,
-  SameSite=Lax, Secure over TLS (`CPM_SECURE_COOKIES` forces it behind a
-  proxy), expires after `CPM_SESSION_TTL_HOURS` (default a week), and logout
+  SameSite=Lax, Secure over TLS (`PPM_SECURE_COOKIES` forces it behind a
+  proxy), expires after `PPM_SESSION_TTL_HOURS` (default a week), and logout
   deletes the server-side row, so a logged-out token is dead even if replayed.
   A failed login does not reveal whether the username exists, and costs the
   same argon2 work either way plus a half-second delay. There is deliberately
   no self-registration and no role system: accounts are managed from the CLI
   (`user add|passwd|remove|list`), and every authenticated user is equivalent —
   profiles are shared, so there is nothing for roles to protect yet. With no
-  accounts and no `CPM_API_KEY`, the loopback default stays exactly as open as
+  accounts and no `PPM_API_KEY`, the loopback default stays exactly as open as
   before. `POST /api/v1/auth/login`, `POST /api/v1/auth/logout`,
   `GET /api/v1/auth/session`; existing databases gain the `users` and
   `sessions` tables on first start without touching existing rows.
@@ -338,7 +338,7 @@ hardware on a timer because that would undo the whole point.
   session ends by itself), and its pinned fingerprint can be moved onto the
   installed browser version on a schedule, so a long-lived profile keeps pace
   with browser releases the way a real machine does. The scheduler runs inside
-  the `camoufox-pm` process — no cron, no extra service — and scheduled
+  the `phasmid-pm` process — no cron, no extra service — and scheduled
   launches go through the same session manager as manual ones. Schedules are
   either *every N minutes* or *daily at HH:MM* on chosen weekdays, on the
   server's clock; they persist in the database and survive restarts. Runs
@@ -471,12 +471,12 @@ hardware on a timer because that would undo the whole point.
   effective configuration — never secret values — and warns when proxy passwords
   are stored unencrypted or the API is unauthenticated.
 - The web UI can authenticate: it sends `X-API-Key` from a key stored per
-  browser, so setting `CPM_API_KEY` no longer locks the bundled UI out.
+  browser, so setting `PPM_API_KEY` no longer locks the bundled UI out.
 - Empty states for a fresh install and for a search with no matches.
-- **Desktop mode**: `camoufox-pm --desktop` runs the server and opens a native
+- **Desktop mode**: `phasmid-pm --desktop` runs the server and opens a native
   window (pywebview; the `desktop` extra).
 - **Standalone desktop app**: `scripts/build_desktop.py` +
-  `packaging/camoufox-pm.spec` produce a PyInstaller bundle (and a macOS `.app`)
+  `packaging/phasmid-pm.spec` produce a PyInstaller bundle (and a macOS `.app`)
   that runs with no Python or Node installed. `desktop.yml` builds macOS/Windows/
   Linux bundles on demand. Signing, installers, and auto-update are documented
   follow-ups (see `docs/accessibility-roadmap.md`).
@@ -491,7 +491,7 @@ hardware on a timer because that would undo the whole point.
   3000, wired together with CORS — months after everything else moved to one
   process serving the UI and the API on one port. The image now builds the UI in
   a Node stage, copies the static export into the package and runs the same
-  `camoufox-pm` entry point a local install does; `web/Dockerfile` is gone and
+  `phasmid-pm` entry point a local install does; `web/Dockerfile` is gone and
   there is no CORS to configure. Verified by building the image and creating a
   profile through the running container.
 
@@ -546,7 +546,7 @@ hardware on a timer because that would undo the whole point.
   Fonts at runtime, so the desktop bundle could not render offline.
 - Dropped the unused shadcn/Radix/Headless UI/heroicons/tanstack kit: 15 runtime
   dependencies down to 4.
-- `camoufox-pm` aligns its settings with the address it actually binds, so
+- `phasmid-pm` aligns its settings with the address it actually binds, so
   `--port` is no longer misreported as the configured default.
 - Removed the `/ws/monitor` WebSocket route: no client used it, it had no tests,
   and it was mounted without the API-key guard.
@@ -564,7 +564,7 @@ hardware on a timer because that would undo the whole point.
 - **The cleanup endpoint could delete every profile directory on the machine.**
   `POST /api/system/profiles/cleanup` and the diagnostic beside it built their
   storage view from hard-coded defaults — `./data` and `./data/profiles.db` —
-  instead of the configured database. With `CPM_DB_PATH` pointing at any other
+  instead of the configured database. With `PPM_DB_PATH` pointing at any other
   file name, they opened an empty database next to the real one, found nothing to
   match the directories on disk against, and removed all of them. A profile
   directory is the account: cookies, storage and saved logins go with it.
@@ -648,12 +648,12 @@ hardware on a timer because that would undo the whole point.
 ### Added
 - Docker support: `docker compose up` runs the API + web UI with a persistent
   data volume.
-- **Single-process mode**: `camoufox-pm` serves the API and the web UI (a Next.js
+- **Single-process mode**: `phasmid-pm` serves the API and the web UI (a Next.js
   static export) on one port from FastAPI — no separate Node server, proxy, or
   CORS at runtime. Build the UI into the package with `scripts/build_webui.py`.
 - **Installable wheel**: the release workflow builds a wheel with the web UI
   bundled in and attaches it to the GitHub Release, so `pip install <wheel>` +
-  `camoufox-pm` works with **no Node.js**. Optional PyPI publishing via Trusted
+  `phasmid-pm` works with **no Node.js**. Optional PyPI publishing via Trusted
   Publishing (see `docs/releasing.md`).
 - A web UI screenshot in the README, from a full end-to-end run.
 - `docs/accessibility-roadmap.md` — a plan for reaching non-technical users.
@@ -668,8 +668,8 @@ hardware on a timer because that would undo the whole point.
 First public release after a comprehensive revamp.
 
 ### Added
-- Opt-in API-key authentication (`CPM_API_KEY`) and environment-based settings.
-- Proxy credentials are encrypted at rest with Fernet (`CPM_SECRET_KEY`).
+- Opt-in API-key authentication (`PPM_API_KEY`) and environment-based settings.
+- Proxy credentials are encrypted at rest with Fernet (`PPM_SECRET_KEY`).
 - Test suite: unit, API integration, and opt-in real-browser smoke tests.
 - GitHub Actions CI (Python 3.10–3.13, frontend build) and release workflow.
 - `.github` issue/PR templates, `CONTRIBUTING`, `SECURITY`, and `CODE_OF_CONDUCT`.
@@ -677,7 +677,7 @@ First public release after a comprehensive revamp.
 
 ### Changed
 - Upgraded Camoufox `0.4.11` → `0.5.4` (Firefox 135 → 152).
-- Adopted a `src/` layout with the `camoufox_pm` package and `pyproject.toml` + uv.
+- Adopted a `src/` layout with the `phasmid_pm` package and `pyproject.toml` + uv.
 - The API now binds to `127.0.0.1` by default with configurable CORS origins.
 - Browser lifecycle extracted into a dedicated `BrowserSessionManager`.
 - The whole codebase and web UI are now English-only and linted with ruff.
@@ -697,12 +697,12 @@ First public release after a comprehensive revamp.
   Camoufox owns fingerprint generation for consistency.
 - Committed profile data, leaked proxy credentials, and duplicate/backup files.
 
-[Unreleased]: https://github.com/polyackiy/camoufox-profile-manager/compare/v0.5.0...HEAD
-[0.5.0]: https://github.com/polyackiy/camoufox-profile-manager/compare/v0.4.1...v0.5.0
-[0.4.1]: https://github.com/polyackiy/camoufox-profile-manager/compare/v0.4.0...v0.4.1
-[0.4.0]: https://github.com/polyackiy/camoufox-profile-manager/compare/v0.3.0...v0.4.0
-[0.3.0]: https://github.com/polyackiy/camoufox-profile-manager/compare/v0.2.1...v0.3.0
-[0.2.1]: https://github.com/polyackiy/camoufox-profile-manager/compare/v0.2.0...v0.2.1
-[0.2.0]: https://github.com/polyackiy/camoufox-profile-manager/compare/v0.1.1...v0.2.0
-[0.1.1]: https://github.com/polyackiy/camoufox-profile-manager/compare/v0.1.0...v0.1.1
-[0.1.0]: https://github.com/polyackiy/camoufox-profile-manager/releases/tag/v0.1.0
+[Unreleased]: https://github.com/tintty1/phasmid-profile-manager/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/tintty1/phasmid-profile-manager/compare/v0.4.1...v0.5.0
+[0.4.1]: https://github.com/tintty1/phasmid-profile-manager/compare/v0.4.0...v0.4.1
+[0.4.0]: https://github.com/tintty1/phasmid-profile-manager/compare/v0.3.0...v0.4.0
+[0.3.0]: https://github.com/tintty1/phasmid-profile-manager/compare/v0.2.1...v0.3.0
+[0.2.1]: https://github.com/tintty1/phasmid-profile-manager/compare/v0.2.0...v0.2.1
+[0.2.0]: https://github.com/tintty1/phasmid-profile-manager/compare/v0.1.1...v0.2.0
+[0.1.1]: https://github.com/tintty1/phasmid-profile-manager/compare/v0.1.0...v0.1.1
+[0.1.0]: https://github.com/tintty1/phasmid-profile-manager/releases/tag/v0.1.0

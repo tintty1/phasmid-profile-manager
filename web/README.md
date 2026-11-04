@@ -1,11 +1,11 @@
 # Web UI
 
-The Camoufox Profile Manager front end: a Next.js 16 app that FastAPI serves as a
+The Phasmid Profile Manager front end: a Next.js 16 app that FastAPI serves as a
 static export, so the whole product runs as one process on one port.
 
 ## Running it
 
-Most of the time you do not need this directory at all — `camoufox-pm` serves a
+Most of the time you do not need this directory at all — `phasmid-pm` serves a
 prebuilt UI. Work here only when changing the interface.
 
 ```bash
@@ -25,7 +25,7 @@ To produce the bundle the Python package ships:
 python ../scripts/build_webui.py
 ```
 
-That runs the static export and copies `out/` into `src/camoufox_pm/webui/`.
+That runs the static export and copies `out/` into `src/phasmid_pm/webui/`.
 
 ## Structure
 

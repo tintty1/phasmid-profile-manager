@@ -18,8 +18,8 @@ Run with:  uv run pytest -m browser
 import pytest
 from camoufox import AsyncCamoufox
 
-from camoufox_pm.core import proxy_check
-from camoufox_pm.core.models import BrowserSettings, Profile
+from phasmid_pm.core import proxy_check
+from phasmid_pm.core.models import BrowserSettings, Profile
 from tests.browser.support import GEOIP_ADDRESS, offline_launch, timezone_a_page_sees
 
 

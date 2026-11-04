@@ -5,8 +5,8 @@ import socket
 
 import pytest
 
-from camoufox_pm.core.database import StorageManager
-from camoufox_pm.core.profile_manager import ProfileManager
+from phasmid_pm.core.database import StorageManager
+from phasmid_pm.core.profile_manager import ProfileManager
 
 
 def pytest_addoption(parser):
@@ -111,6 +111,6 @@ async def profile_manager(tmp_path, monkeypatch, request):
     # Unit launches use fake browser sessions; installation itself has separate
     # tests. A CI worker is not required to carry a 300 MB browser binary.
     if request.node.get_closest_marker("browser") is None:
-        monkeypatch.setattr("camoufox_pm.core.browser_install.ensure_browser_ready", lambda: None)
+        monkeypatch.setattr("phasmid_pm.core.browser_install.ensure_browser_ready", lambda: None)
     yield manager
     await storage.close()

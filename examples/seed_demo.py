@@ -11,9 +11,9 @@ can explore the API and web interface with realistic data.
 
 import asyncio
 
-from camoufox_pm.core.database import StorageManager
-from camoufox_pm.core.models import ProxyConfig, ProxyType
-from camoufox_pm.core.profile_manager import ProfileManager
+from phasmid_pm.core.database import StorageManager
+from phasmid_pm.core.models import ProxyConfig, ProxyType
+from phasmid_pm.core.profile_manager import ProfileManager
 
 DEMO_PROFILES = [
     {"name": "US shopper", "region": "us"},

@@ -1,6 +1,6 @@
 """Tests for core data models."""
 
-from camoufox_pm.core.models import ProxyConfig, ProxyType, generate_short_id
+from phasmid_pm.core.models import ProxyConfig, ProxyType, generate_short_id
 
 
 def test_short_id_shape_and_uniqueness():

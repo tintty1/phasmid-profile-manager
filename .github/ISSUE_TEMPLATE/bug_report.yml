@@ -1,5 +1,5 @@
 name: Bug report
-description: Report a problem with Camoufox Profile Manager
+description: Report a problem with Phasmid Profile Manager
 labels: ["bug"]
 body:
   - type: markdown

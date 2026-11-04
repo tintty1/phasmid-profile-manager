@@ -7,7 +7,7 @@ The older tests in this directory deliberately keep calling the unversioned
 
 import pytest
 
-from camoufox_pm.main import app
+from phasmid_pm.main import app
 
 
 @pytest.mark.asyncio
@@ -62,9 +62,9 @@ async def test_late_validation_errors_use_the_same_shape(client):
 
 @pytest.mark.asyncio
 async def test_auth_failures_use_the_same_shape(client, monkeypatch):
-    from camoufox_pm.config import get_settings
+    from phasmid_pm.config import get_settings
 
-    monkeypatch.setenv("CPM_API_KEY", "top-secret")
+    monkeypatch.setenv("PPM_API_KEY", "top-secret")
     get_settings.cache_clear()
     try:
         response = await client.get("/api/v1/profiles")
@@ -78,7 +78,7 @@ async def test_auth_failures_use_the_same_shape(client, monkeypatch):
 async def test_health_reports_unhealthy_as_503(client, monkeypatch):
     """A healthy-looking 200 would hide the failure from probes that only read
     the status code."""
-    from camoufox_pm.api import dependencies
+    from phasmid_pm.api import dependencies
 
     monkeypatch.setattr(dependencies, "_profile_manager", None)
     response = await client.get("/health")

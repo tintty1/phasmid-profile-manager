@@ -2,7 +2,7 @@
 
 The app can run two things against a profile on a schedule, from the
 **Schedules** screen or the [REST API](api.md#schedules). The scheduler lives
-inside the `camoufox-pm` process — no cron, no extra service — because that
+inside the `phasmid-pm` process — no cron, no extra service — because that
 process owns the browser sessions: a scheduled launch goes through the same
 session manager as pressing *Open*, so the running-browsers list, the
 close-on-window-close handling and the usage log all behave identically.
@@ -42,7 +42,7 @@ fingerprint* on the profile, which warns about what it costs.
 - **Two expressions.** *Every N minutes*, or *daily at HH:MM* on chosen
   weekdays. Not cron: the two forms cover warming and maintenance, they can be
   displayed back unambiguously, and there is no syntax to get wrong.
-- **Whose clock?** The server's — the machine running `camoufox-pm`. In the
+- **Whose clock?** The server's — the machine running `phasmid-pm`. In the
   normal single-machine setup that is also your clock. If you run the server
   remotely, "09:00" is 09:00 *there*.
 - **Missed runs are skipped, not replayed.** If the app was closed when a run

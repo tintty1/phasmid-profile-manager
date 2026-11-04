@@ -11,8 +11,8 @@ import asyncio
 import pytest
 from camoufox import AsyncCamoufox
 
-from camoufox_pm.core.browser_session import BrowserSessionManager
-from camoufox_pm.core.models import BrowserSettings, Profile, WebRTCMode
+from phasmid_pm.core.browser_session import BrowserSessionManager
+from phasmid_pm.core.models import BrowserSettings, Profile, WebRTCMode
 from tests.browser.support import offline_launch, timezone_a_page_sees
 
 

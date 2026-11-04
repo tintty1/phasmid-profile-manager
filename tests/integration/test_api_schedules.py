@@ -2,7 +2,7 @@
 
 import pytest
 
-from camoufox_pm.api import dependencies
+from phasmid_pm.api import dependencies
 
 
 async def make_profile(client, name="scheduled") -> str:
@@ -126,7 +126,7 @@ async def test_run_now_records_an_outcome_and_history_serves_it(client, monkeypa
         manager.browser_sessions.active_sessions[pid] = FakeSession()
         return FakeSession()
 
-    from camoufox_pm.core import profile_manager as pm_module
+    from phasmid_pm.core import profile_manager as pm_module
 
     monkeypatch.setattr(manager.browser_sessions, "launch", fake_launch)
     monkeypatch.setattr(pm_module.fingerprint_store, "resolve", lambda *_a, **_k: {})

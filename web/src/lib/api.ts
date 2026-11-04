@@ -1,4 +1,4 @@
-// API client for the Camoufox Profile Manager backend.
+// API client for the Phasmid Profile Manager backend.
 //
 // The UI is served by the API on the same origin, so the base URL is empty by
 // default; NEXT_PUBLIC_API_URL overrides it for split deployments.
@@ -143,9 +143,9 @@ export function isStaleWrite(error: unknown): boolean {
   return error instanceof ApiRequestError && error.status === 409 && error.code === 'stale_write'
 }
 
-const API_KEY_STORAGE = 'camoufox-pm.api-key'
+const API_KEY_STORAGE = 'phasmid-pm.api-key'
 
-/** The key CPM_API_KEY expects, if the user has stored one. */
+/** The key PPM_API_KEY expects, if the user has stored one. */
 export function getApiKey(): string {
   if (typeof window === 'undefined') return ''
   return window.localStorage.getItem(API_KEY_STORAGE) ?? ''

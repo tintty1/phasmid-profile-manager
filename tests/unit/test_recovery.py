@@ -7,14 +7,14 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from camoufox_pm.core import profile_archive
-from camoufox_pm.core.backups import ProfileBackupManager
-from camoufox_pm.core.cleanup import ProfileCleanupManager
-from camoufox_pm.core.database import StorageManager
-from camoufox_pm.core.leases import ProfileLocked
-from camoufox_pm.core.models import Schedule, ScheduleAction, ScheduleKind
-from camoufox_pm.core.profile_operations import profile_operation
-from camoufox_pm.core.scheduler import TaskScheduler
+from phasmid_pm.core import profile_archive
+from phasmid_pm.core.backups import ProfileBackupManager
+from phasmid_pm.core.cleanup import ProfileCleanupManager
+from phasmid_pm.core.database import StorageManager
+from phasmid_pm.core.leases import ProfileLocked
+from phasmid_pm.core.models import Schedule, ScheduleAction, ScheduleKind
+from phasmid_pm.core.profile_operations import profile_operation
+from phasmid_pm.core.scheduler import TaskScheduler
 
 
 async def seeded(manager):
@@ -246,15 +246,15 @@ async def test_backup_refuses_unreadable_credentials_and_keeps_previous_checkpoi
 ):
     from cryptography.fernet import Fernet
 
-    from camoufox_pm.config import get_settings
+    from phasmid_pm.config import get_settings
 
-    monkeypatch.setenv("CPM_SECRET_KEY", Fernet.generate_key().decode())
+    monkeypatch.setenv("PPM_SECRET_KEY", Fernet.generate_key().decode())
     get_settings.cache_clear()
     try:
         profile, _ = await seeded(profile_manager)
         backups = ProfileBackupManager(profile_manager)
         good = (await backups.create_backups())["backups"][0]
-        monkeypatch.delenv("CPM_SECRET_KEY")
+        monkeypatch.delenv("PPM_SECRET_KEY")
         get_settings.cache_clear()
         result = await backups.create_backups(reason="before_update")
         assert result["backups"] == []

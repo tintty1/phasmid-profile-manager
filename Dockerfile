@@ -1,10 +1,10 @@
 # One image, one process: FastAPI serves the REST API and the built web UI on a
-# single port, exactly as `camoufox-pm` does outside a container. The UI is built
+# single port, exactly as `phasmid-pm` does outside a container. The UI is built
 # in the first stage and copied in, so the runtime image carries no Node.
 #
 # Browsers launched from the container are real (headed) Camoufox processes, so
 # the image carries Firefox's GTK/X11 runtime libraries and TigerVNC: with
-# CPM_VNC=1 every launch gets its own VNC display, viewed and driven from the
+# PPM_VNC=1 every launch gets its own VNC display, viewed and driven from the
 # web UI.
 
 FROM node:20-slim AS webui
@@ -35,17 +35,17 @@ COPY pyproject.toml uv.lock README.md ./
 COPY src ./src
 RUN uv sync --no-dev --frozen
 
-# The static export, where the package looks for it when no CPM_WEBUI_DIR is set.
-COPY --from=webui /web/out ./src/camoufox_pm/webui
+# The static export, where the package looks for it when no PPM_WEBUI_DIR is set.
+COPY --from=webui /web/out ./src/phasmid_pm/webui
 
-ENV CPM_VNC=1 \
-    CPM_HOST=0.0.0.0 \
-    CPM_PORT=8000 \
-    CPM_DB_PATH=/data/profiles.db
+ENV PPM_VNC=1 \
+    PPM_HOST=0.0.0.0 \
+    PPM_PORT=8000 \
+    PPM_DB_PATH=/data/profiles.db
 
 VOLUME ["/data"]
 EXPOSE 8000
 
 # The console script, so the container runs the same entry point as a local
 # install rather than a second, drifting invocation of uvicorn.
-CMD ["uv", "run", "camoufox-pm", "--host", "0.0.0.0", "--port", "8000", "--no-browser"]
+CMD ["uv", "run", "phasmid-pm", "--host", "0.0.0.0", "--port", "8000", "--no-browser"]

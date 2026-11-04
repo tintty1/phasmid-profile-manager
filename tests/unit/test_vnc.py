@@ -4,10 +4,10 @@ import base64
 
 import pytest
 
-from camoufox_pm.api.routes.viewer import _api_key_from_protocols
-from camoufox_pm.core import browser_session as bs
-from camoufox_pm.core.browser_session import BrowserLaunchError, BrowserSessionManager
-from camoufox_pm.core.vnc import DEFAULT_GEOMETRY, display_geometry
+from phasmid_pm.api.routes.viewer import _api_key_from_protocols
+from phasmid_pm.core import browser_session as bs
+from phasmid_pm.core.browser_session import BrowserLaunchError, BrowserSessionManager
+from phasmid_pm.core.vnc import DEFAULT_GEOMETRY, display_geometry
 
 
 class FakeDisplay:
@@ -92,9 +92,9 @@ def test_geometry_falls_back_to_the_screen_then_the_window_then_the_default():
 
 def test_api_key_is_read_from_the_subprotocol():
     encoded = base64.urlsafe_b64encode(b"s3cret/+key").decode().rstrip("=")
-    assert _api_key_from_protocols(["binary", f"cpm-key.{encoded}"]) == "s3cret/+key"
+    assert _api_key_from_protocols(["binary", f"ppm-key.{encoded}"]) == "s3cret/+key"
     assert _api_key_from_protocols(["binary"]) is None
-    assert _api_key_from_protocols(["cpm-key.!!!"]) is None
+    assert _api_key_from_protocols(["ppm-key.!!!"]) is None
 
 
 @pytest.mark.asyncio
@@ -176,7 +176,7 @@ def test_an_explicit_mode_wins_over_headless_and_the_vnc_default():
 
 @pytest.mark.asyncio
 async def test_virtual_mode_works_without_vnc_as_the_default(launches):
-    """CPM_VNC only picks the default; any instance can be asked for a display."""
+    """PPM_VNC only picks the default; any instance can be asked for a display."""
     made, _ = launches
     displays = FakeDisplays()
     displays.enabled = False

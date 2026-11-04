@@ -9,16 +9,16 @@ from urllib.parse import urlparse
 
 import pytest
 
-from camoufox_pm import desktop
-from camoufox_pm.config import get_settings
+from phasmid_pm import desktop
+from phasmid_pm.config import get_settings
 
 
 @pytest.fixture
 def desktop_runtime(monkeypatch, tmp_path):
-    monkeypatch.setenv("CPM_DB_PATH", str(tmp_path / "profiles.db"))
-    monkeypatch.delenv("CPM_SECRET_KEY", raising=False)
-    monkeypatch.delenv("CPM_PORT", raising=False)
-    monkeypatch.delenv("CPM_HOST", raising=False)
+    monkeypatch.setenv("PPM_DB_PATH", str(tmp_path / "profiles.db"))
+    monkeypatch.delenv("PPM_SECRET_KEY", raising=False)
+    monkeypatch.delenv("PPM_PORT", raising=False)
+    monkeypatch.delenv("PPM_HOST", raising=False)
     webview = SimpleNamespace(create_window=Mock(), start=Mock())
     monkeypatch.setitem(sys.modules, "webview", webview)
     servers = []
@@ -102,8 +102,8 @@ def test_dead_server_does_not_pass_readiness_for_occupied_port():
 
 
 def test_packaged_entrypoint_bootstraps_before_window(monkeypatch, tmp_path):
-    monkeypatch.setenv("CPM_DB_PATH", str(tmp_path / "desktop-data" / "profiles.db"))
-    monkeypatch.delenv("CPM_SECRET_KEY", raising=False)
+    monkeypatch.setenv("PPM_DB_PATH", str(tmp_path / "desktop-data" / "profiles.db"))
+    monkeypatch.delenv("PPM_SECRET_KEY", raising=False)
     observed = []
     monkeypatch.setattr(desktop, "run_desktop", lambda: observed.append(get_settings().db_path))
     desktop.main()

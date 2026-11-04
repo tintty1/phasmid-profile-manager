@@ -7,20 +7,20 @@ from unittest.mock import AsyncMock, Mock
 import httpx
 import pytest
 
-from camoufox_pm.api.dependencies import get_profile_manager
-from camoufox_pm.api.routes import recovery, runtime
-from camoufox_pm.config import get_settings
-from camoufox_pm.core.backups import ProfileBackupManager
-from camoufox_pm.core.browser_install import BrowserStatus
-from camoufox_pm.core.updates import RELEASES, UpdateStatus
-from camoufox_pm.main import app
+from phasmid_pm.api.dependencies import get_profile_manager
+from phasmid_pm.api.routes import recovery, runtime
+from phasmid_pm.config import get_settings
+from phasmid_pm.core.backups import ProfileBackupManager
+from phasmid_pm.core.browser_install import BrowserStatus
+from phasmid_pm.core.updates import RELEASES, UpdateStatus
+from phasmid_pm.main import app
 
 
 @pytest.fixture(autouse=True)
 def isolate_auth(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    monkeypatch.delenv("CPM_API_KEY", raising=False)
-    monkeypatch.delenv("CPM_SECRET_KEY", raising=False)
+    monkeypatch.delenv("PPM_API_KEY", raising=False)
+    monkeypatch.delenv("PPM_SECRET_KEY", raising=False)
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()
@@ -71,7 +71,7 @@ async def test_explicit_post_starts_download_and_returns_pollable_progress(clien
 
 
 async def test_runtime_routes_use_existing_api_auth_guard(client, monkeypatch):
-    monkeypatch.setenv("CPM_API_KEY", "test-runtime-key")
+    monkeypatch.setenv("PPM_API_KEY", "test-runtime-key")
     get_settings.cache_clear()
     installer = Mock()
     monkeypatch.setattr(runtime, "browser_installer", installer)

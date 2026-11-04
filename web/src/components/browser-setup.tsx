@@ -23,7 +23,7 @@ export function BrowserSetup({ firstProfile = false, onCreate }: { firstProfile?
     // Remember an explicit dismissal across visits; Settings always keeps setup available.
     try {
       // eslint-disable-next-line react-hooks/set-state-in-effect
-      setDismissed(window.localStorage.getItem('camoufox-pm.setup-dismissed') === '1')
+      setDismissed(window.localStorage.getItem('phasmid-pm.setup-dismissed') === '1')
     } catch { /* Storage can be disabled in embedded browsers. */ }
     // The request completes asynchronously; this effect starts the initial API read.
     load()
@@ -82,7 +82,7 @@ export function BrowserSetup({ firstProfile = false, onCreate }: { firstProfile?
             {!onCreate && <button className="btn btn-ghost" disabled={downloading} onClick={load}>Check again</button>}
           </div>
         </div>
-        {onCreate && <button className="btn btn-ghost h-7 w-7 shrink-0 p-0" aria-label="Dismiss setup banner" title="Setup remains available in Settings" onClick={() => { setDismissed(true); try { window.localStorage.setItem('camoufox-pm.setup-dismissed', '1') } catch { /* Dismissal still applies for this visit. */ } }}><X size={15} aria-hidden="true" /></button>}
+        {onCreate && <button className="btn btn-ghost h-7 w-7 shrink-0 p-0" aria-label="Dismiss setup banner" title="Setup remains available in Settings" onClick={() => { setDismissed(true); try { window.localStorage.setItem('phasmid-pm.setup-dismissed', '1') } catch { /* Dismissal still applies for this visit. */ } }}><X size={15} aria-hidden="true" /></button>}
       </div>
     </section>
   )

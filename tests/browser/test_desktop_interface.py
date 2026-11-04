@@ -3,8 +3,8 @@
 import pytest
 from camoufox.async_api import AsyncCamoufox
 
-from camoufox_pm.core.fingerprint_store import resolve
-from camoufox_pm.core.models import Profile
+from phasmid_pm.core.fingerprint_store import resolve
+from phasmid_pm.core.models import Profile
 from tests.browser.support import offline_launch, serve_local_sites
 from tests.browser.test_fingerprint_stability import IDENTITY
 

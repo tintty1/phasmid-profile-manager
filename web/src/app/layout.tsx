@@ -7,7 +7,7 @@ import './fonts.css'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'Camoufox Profile Manager',
+  title: 'Phasmid Profile Manager',
   description: 'Antidetect browser profile management',
 }
 

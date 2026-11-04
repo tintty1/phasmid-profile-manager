@@ -9,8 +9,8 @@ from datetime import datetime
 
 import pytest
 
-from camoufox_pm.core.database import StaleWriteError, StorageManager
-from camoufox_pm.core.models import BrowserSettings, Profile
+from phasmid_pm.core.database import StaleWriteError, StorageManager
+from phasmid_pm.core.models import BrowserSettings, Profile
 
 
 async def _profile(storage: StorageManager, name: str = "p") -> Profile:
@@ -229,7 +229,7 @@ async def test_an_edit_without_a_version_still_works(profile_manager):
 
 async def test_an_edit_after_a_launch_keeps_the_pinned_machine(profile_manager, monkeypatch):
     """The path users actually take: the manager re-reads, so nothing is reverted."""
-    from camoufox_pm.core import profile_manager as pm_module
+    from phasmid_pm.core import profile_manager as pm_module
 
     class FakeSession:
         process_id = 1
@@ -267,7 +267,7 @@ async def test_an_edit_made_while_a_launch_resolves_is_not_reverted(profile_mana
     the rename lands while resolve is running, exactly as another instance's
     save would.
     """
-    from camoufox_pm.core import profile_manager as pm_module
+    from phasmid_pm.core import profile_manager as pm_module
 
     class FakeSession:
         process_id = 1

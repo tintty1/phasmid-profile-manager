@@ -4,11 +4,11 @@ import httpx
 import pytest
 from httpx import ASGITransport
 
-from camoufox_pm.api import dependencies
-from camoufox_pm.core.database import StorageManager
-from camoufox_pm.core.profile_manager import ProfileManager
-from camoufox_pm.core.scheduler import TaskScheduler
-from camoufox_pm.main import app
+from phasmid_pm.api import dependencies
+from phasmid_pm.core.database import StorageManager
+from phasmid_pm.core.profile_manager import ProfileManager
+from phasmid_pm.core.scheduler import TaskScheduler
+from phasmid_pm.main import app
 
 
 @pytest.fixture
@@ -21,9 +21,9 @@ async def client(tmp_path, monkeypatch):
 
     dependencies.set_storage_manager(storage)
     dependencies.set_profile_manager(manager)
-    monkeypatch.setattr("camoufox_pm.core.browser_install.ensure_browser_ready", lambda: None)
-    from camoufox_pm.api.routes.recovery import set_backup_manager
-    from camoufox_pm.core.backups import ProfileBackupManager
+    monkeypatch.setattr("phasmid_pm.core.browser_install.ensure_browser_ready", lambda: None)
+    from phasmid_pm.api.routes.recovery import set_backup_manager
+    from phasmid_pm.core.backups import ProfileBackupManager
 
     set_backup_manager(ProfileBackupManager(manager))
     # Not started: the routes only need it to plan and to run-now; the loop

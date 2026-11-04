@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from camoufox_pm.core import fingerprint_store
-from camoufox_pm.core import profile_manager as pm_module
+from phasmid_pm.core import fingerprint_store
+from phasmid_pm.core import profile_manager as pm_module
 
 PINNED = {
     "navigator.userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0",

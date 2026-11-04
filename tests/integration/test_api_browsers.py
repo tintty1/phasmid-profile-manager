@@ -6,8 +6,8 @@ report and close them can be checked without a Camoufox binary.
 
 import pytest
 
-from camoufox_pm.api.dependencies import get_profile_manager
-from camoufox_pm.core.browser_session import BrowserSession
+from phasmid_pm.api.dependencies import get_profile_manager
+from phasmid_pm.core.browser_session import BrowserSession
 
 
 class FakeCamoufox:

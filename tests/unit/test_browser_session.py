@@ -5,8 +5,8 @@ import asyncio
 import psutil
 import pytest
 
-from camoufox_pm.core import browser_session as bs
-from camoufox_pm.core.browser_session import (
+from phasmid_pm.core import browser_session as bs
+from phasmid_pm.core.browser_session import (
     BrowserLaunchError,
     BrowserSession,
     BrowserSessionManager,
@@ -446,7 +446,7 @@ async def test_every_launch_is_served_to_playwright_on_loopback(installed):
     session = await mgr.launch("p1", {"headless": True})
 
     # Loopback only: it has no auth of its own, the API relay is the way in.
-    assert inner.bound == [("camoufox-pm p1", "127.0.0.1", 0)]
+    assert inner.bound == [("phasmid-pm p1", "127.0.0.1", 0)]
     assert session.playwright_endpoint == "ws://127.0.0.1:4100/abc"
     assert mgr.list_active()[0]["playwright"] is True
 

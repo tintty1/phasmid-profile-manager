@@ -10,7 +10,7 @@ import io
 import pytest
 from openpyxl import Workbook, load_workbook
 
-from camoufox_pm.core.excel_manager import ExcelManager
+from phasmid_pm.core.excel_manager import ExcelManager
 
 
 def build_sheet(excel_manager: ExcelManager, rows: list[dict], columns=None) -> bytes:

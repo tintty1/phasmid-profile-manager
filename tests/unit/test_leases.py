@@ -10,11 +10,11 @@ import asyncio
 
 import pytest
 
-from camoufox_pm.config import Settings
-from camoufox_pm.core import profile_manager as pm_module
-from camoufox_pm.core.database import StorageManager
-from camoufox_pm.core.leases import ProfileLocked, lease_expired, make_lease_holder
-from camoufox_pm.core.models import BrowserSettings, Profile
+from phasmid_pm.config import Settings
+from phasmid_pm.core import profile_manager as pm_module
+from phasmid_pm.core.database import StorageManager
+from phasmid_pm.core.leases import ProfileLocked, lease_expired, make_lease_holder
+from phasmid_pm.core.models import BrowserSettings, Profile
 
 OTHER = "other-host:999:c0ffee"
 TTL = 120

@@ -10,7 +10,7 @@ import asyncio
 
 import pytest
 
-from camoufox_pm.core import proxy_check
+from phasmid_pm.core import proxy_check
 
 TOKYO = proxy_check.ProxyLocation(
     ip="203.0.113.7",
@@ -361,7 +361,7 @@ async def test_an_imported_profile_starts_unchecked(client, exit_in_tokyo):
 @pytest.mark.asyncio
 async def test_an_unreadable_stored_check_costs_a_dot_not_the_list(client, exit_in_tokyo):
     """The column is cosmetic; it must not be able to take the profiles screen down."""
-    from camoufox_pm.api.dependencies import get_profile_manager
+    from phasmid_pm.api.dependencies import get_profile_manager
 
     created = await client.post("/api/profiles", json={"name": "corrupt"})
     profile_id = created.json()["id"]

@@ -13,8 +13,8 @@ import hashlib
 import pytest
 from camoufox import AsyncCamoufox
 
-from camoufox_pm.core import fingerprint_store
-from camoufox_pm.core.models import BrowserSettings, Profile, ProxyConfig, ProxyType
+from phasmid_pm.core import fingerprint_store
+from phasmid_pm.core.models import BrowserSettings, Profile, ProxyConfig, ProxyType
 from tests.browser.support import offline_launch
 
 IDENTITY = """() => {

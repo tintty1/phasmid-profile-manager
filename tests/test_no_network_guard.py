@@ -8,7 +8,7 @@ import socket
 
 import pytest
 
-from camoufox_pm.core import proxy_check
+from phasmid_pm.core import proxy_check
 
 
 def _type_names(error: BaseException):

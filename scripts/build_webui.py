@@ -2,7 +2,7 @@
 """Build the web UI as a static export and bundle it into the Python package.
 
 Runs ``npm run build:static`` in ``web/`` and copies the result into
-``src/camoufox_pm/webui/`` so ``camoufox-pm`` (and an installed wheel) can serve
+``src/phasmid_pm/webui/`` so ``phasmid-pm`` (and an installed wheel) can serve
 the UI on the same origin as the API. Requires Node.js.
 
     python scripts/build_webui.py
@@ -17,7 +17,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 WEB = ROOT / "web"
 OUT = WEB / "out"
-DEST = ROOT / "src" / "camoufox_pm" / "webui"
+DEST = ROOT / "src" / "phasmid_pm" / "webui"
 
 
 def _npm() -> str:

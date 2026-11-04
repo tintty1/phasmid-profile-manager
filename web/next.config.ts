@@ -5,7 +5,7 @@ import type { NextConfig } from "next";
 //    so the browser talks to the same origin (no CORS). Target: API_PROXY_TARGET.
 //  - static export (NEXT_EXPORT=1): emits a static `out/` that FastAPI serves on
 //    the same origin as the API, so no rewrites are needed. Used by the
-//    single-process `camoufox-pm` launcher.
+//    single-process `phasmid-pm` launcher.
 const isExport = process.env.NEXT_EXPORT === "1";
 const apiTarget = process.env.API_PROXY_TARGET ?? "http://localhost:8000";
 

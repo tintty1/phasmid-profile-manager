@@ -14,7 +14,7 @@ services:
   app:
     environment:
       # Headed launches default to a desktop window instead of a VNC display.
-      CPM_VNC: "0"
+      PPM_VNC: "0"
       WAYLAND_DISPLAY: ${WAYLAND_DISPLAY:-wayland-1}
       XDG_RUNTIME_DIR: /run/user/0
     volumes:

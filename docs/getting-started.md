@@ -4,23 +4,23 @@
 
 ## Download and open
 
-Open the [releases page](https://github.com/polyackiy/camoufox-profile-manager/releases)
+Open the [releases page](https://github.com/tintty1/phasmid-profile-manager/releases)
 and choose a desktop installer from a release's **Assets**. Python, Node.js and a
 terminal are unnecessary for desktop packages. Installer builds are attached by
 the release workflow; older releases may only contain Python packages.
 
 | Computer | File | Installation |
 | --- | --- | --- |
-| Mac with Apple Silicon (M1 or newer) | `camoufox-pm-macos-arm64.dmg` | Open the disk image, drag the app into Applications, then open it there. |
-| Mac with Intel processor | `camoufox-pm-macos-x86_64.dmg` | Open the disk image, drag the app into Applications, then open it there. |
-| Windows 10/11, 64-bit Intel/AMD | `camoufox-pm-windows-x86_64-setup.exe` | Run the installer, then open the app from the Start menu. Installs for your account. |
-| Ubuntu 22.04+ or compatible Debian, 64-bit Intel/AMD | `camoufox-pm-linux-x86_64.deb` | Open with the system software installer, then launch from Applications. |
+| Mac with Apple Silicon (M1 or newer) | `phasmid-pm-macos-arm64.dmg` | Open the disk image, drag the app into Applications, then open it there. |
+| Mac with Intel processor | `phasmid-pm-macos-x86_64.dmg` | Open the disk image, drag the app into Applications, then open it there. |
+| Windows 10/11, 64-bit Intel/AMD | `phasmid-pm-windows-x86_64-setup.exe` | Run the installer, then open the app from the Start menu. Installs for your account. |
+| Ubuntu 22.04+ or compatible Debian, 64-bit Intel/AMD | `phasmid-pm-linux-x86_64.deb` | Open with the system software installer, then launch from Applications. |
 
 If Microsoft WebView2 is missing on Windows, the installer downloads it through
 Microsoft’s official runtime bootstrapper; this needs internet access.
 
 Linux also has a portable `.tar.gz`: extract the complete folder and open its
-`camoufox-pm` executable. Keep the `_internal` directory beside it. The desktop
+`phasmid-pm` executable. Keep the `_internal` directory beside it. The desktop
 webview needs system graphics libraries; use the `.deb` where possible because
 it declares those dependencies. Other Linux distributions have not been validated.
 
@@ -31,7 +31,7 @@ security features. See [signing status and limitations](signing.md).
 
 ## First profile
 
-1. Open **Camoufox Profile Manager**. It keeps your data separately from the installed app.
+1. Open **Phasmid Profile Manager**. It keeps your data separately from the installed app.
 2. Choose **Install browser** in the setup banner. Internet access is needed for
    this initial download. Progress and errors appear in the app; if downloading
    fails, retry. **Retry download** is also available in Settings.
@@ -79,9 +79,9 @@ The desktop app uses the same folder regardless of where you launch it:
 
 | System | Default data folder |
 | --- | --- |
-| macOS | `~/Library/Application Support/Camoufox Profile Manager/` |
-| Windows | `%LOCALAPPDATA%\Camoufox Profile Manager\` |
-| Linux | `$XDG_DATA_HOME/camoufox-profile-manager/` or `~/.local/share/camoufox-profile-manager/` |
+| macOS | `~/Library/Application Support/Phasmid Profile Manager/` |
+| Windows | `%LOCALAPPDATA%\Phasmid Profile Manager\` |
+| Linux | `$XDG_DATA_HOME/phasmid-profile-manager/` or `~/.local/share/phasmid-profile-manager/` |
 
 Keep the whole folder, including `profiles.db`, browser data, backups and
 `secret.key`. A fresh desktop install generates this encryption key; losing it
@@ -101,14 +101,14 @@ private information.
 Install [uv](https://docs.astral.sh/uv/) and Node.js 20.9+; uv manages Python.
 
 ```bash
-git clone https://github.com/polyackiy/camoufox-profile-manager.git
-cd camoufox-profile-manager
+git clone https://github.com/tintty1/phasmid-profile-manager.git
+cd phasmid-profile-manager
 uv sync --extra desktop
 uv run python scripts/build_webui.py
-uv run python -m camoufox_pm.desktop
+uv run python -m phasmid_pm.desktop
 ```
 
 On Linux, source desktop mode also needs a supported pywebview GUI backend and
 its system libraries. The packaged `.deb` bundles the Qt backend. For a web tab
-instead, use `uv sync`, build the UI, and run `uv run camoufox-pm`.
+instead, use `uv sync`, build the UI, and run `uv run phasmid-pm`.
 [CLI options](cli.md) and [profile settings](profile-settings.md) cover advanced use.

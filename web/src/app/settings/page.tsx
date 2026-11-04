@@ -79,15 +79,15 @@ export default function SettingsPage() {
             <Toggle
               on={config.encryption_enabled}
               label="Proxy password encryption"
-              onText="Passwords are encrypted at rest with CPM_SECRET_KEY."
-              offText="Passwords are stored as plain text. Set CPM_SECRET_KEY to encrypt them."
+              onText="Passwords are encrypted at rest with PPM_SECRET_KEY."
+              offText="Passwords are stored as plain text. Set PPM_SECRET_KEY to encrypt them."
               warnWhenOff
             />
             <Toggle
               on={config.user_auth_enabled}
               label="User accounts"
-              onText="Login is required. Manage accounts with: camoufox-pm user"
-              offText="No user accounts. Create one with: camoufox-pm user add <name>"
+              onText="Login is required. Manage accounts with: phasmid-pm user"
+              offText="No user accounts. Create one with: phasmid-pm user add <name>"
               warnWhenOff={config.host !== '127.0.0.1' && !config.api_key_set}
             />
             <Toggle
@@ -110,7 +110,7 @@ export default function SettingsPage() {
                     className="field font-mono"
                     value={key}
                     onChange={(event) => setKey(event.target.value)}
-                    placeholder="Paste CPM_API_KEY to keep using this UI"
+                    placeholder="Paste PPM_API_KEY to keep using this UI"
                     aria-label="API key for this browser"
                     autoComplete="off"
                   />

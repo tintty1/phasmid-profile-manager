@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for your interest in improving Camoufox Profile Manager! This document
+Thanks for your interest in improving Phasmid Profile Manager! This document
 describes how to set up a development environment and the conventions we follow.
 
 ## Development setup
@@ -32,7 +32,7 @@ Please make sure the following pass before opening a pull request:
 # Backend
 uv run ruff check src tests        # lint
 uv run ruff format --check src tests  # formatting
-uv run mypy src/camoufox_pm        # type-check
+uv run mypy src/phasmid_pm        # type-check
 uv run pytest -m "not browser"     # fast tests (no browser)
 uv run pytest -m browser           # opt-in: real Camoufox launch
 
@@ -42,7 +42,7 @@ cd web && npm run lint && npm run build
 
 CI runs the same checks on Python 3.10–3.13.
 
-To work on the single-process mode (`camoufox-pm`), build the UI into the package
+To work on the single-process mode (`phasmid-pm`), build the UI into the package
 first — otherwise the server has nothing to serve:
 
 ```bash
@@ -116,7 +116,7 @@ browser binary and is covered by the `browser`-marked tests.
 
 ## Project layout
 
-- `src/camoufox_pm/` — the Python package (core logic, REST API).
+- `src/phasmid_pm/` — the Python package (core logic, REST API).
 - `web/` — the Next.js web interface.
 - `extras/chrome_migration/` — optional Chrome → Camoufox migration module.
 - `tests/` — unit, integration, and opt-in browser tests.

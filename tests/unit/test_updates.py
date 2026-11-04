@@ -3,7 +3,7 @@
 import httpx
 import pytest
 
-from camoufox_pm.core import updates
+from phasmid_pm.core import updates
 
 
 @pytest.fixture
@@ -29,7 +29,7 @@ def github(monkeypatch):
 
 
 async def test_new_stable_release_uses_official_page_and_filters_foreign_assets(github):
-    official = f"{updates.RELEASES}/download/v999.0.0/camoufox-pm.zip"
+    official = f"{updates.RELEASES}/download/v999.0.0/phasmid-pm.zip"
     requests = github(
         {
             "tag_name": "v999.0.0",
@@ -55,7 +55,7 @@ async def test_new_stable_release_uses_official_page_and_filters_foreign_assets(
     assert len(requests) == 1
     assert (
         str(requests[0].url)
-        == "https://api.github.com/repos/polyackiy/camoufox-profile-manager/releases/latest"
+        == "https://api.github.com/repos/tintty1/phasmid-profile-manager/releases/latest"
     )
     assert requests[0].headers["Accept"] == "application/vnd.github+json"
 

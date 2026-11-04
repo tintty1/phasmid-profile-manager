@@ -6,7 +6,7 @@ Runs the API and the web UI as one process on one port, and opens the UI.
 
 ```
 usage: phasmid-pm [-h] [--host HOST] [--port PORT] [--no-browser] [--desktop]
-                   {user} ...
+                  {user,unlock,leases} ...
 ```
 
 | Flag | Default | What it does |
@@ -22,20 +22,21 @@ on the Settings screen) reflect what it actually bound to.
 
 ```bash
 phasmid-pm                          # http://localhost:8000, opens a browser
-phasmid-pm --port 9000 --no-browser # run headless on another port
+phasmid-pm --port 9000 --no-browser # another port, no browser tab
 phasmid-pm --desktop                # native window
 ```
 
 To stop the web server, press `Ctrl+C`; in desktop mode close the window.
 Any browsers it launched are closed with it.
 
-Desktop installers start the dedicated desktop launcher without flags (the
-source equivalent is `python -m phasmid_pm.desktop`). This launcher chooses a free loopback port
-and bootstraps the OS data folder and encryption key. `phasmid-pm --desktop`
-also uses the desktop data folder but retains CLI host/port flag handling. Plain
-`phasmid-pm` and its administration commands retain their existing
-`data/profiles.db` default; set `PPM_DB_PATH` explicitly when managing a desktop
-database. [Data folder locations](getting-started.md#where-data-lives).
+`python -m phasmid_pm.desktop` is the dedicated desktop launcher. It takes no
+flags, picks a free loopback port, and keeps its database and a generated
+encryption key in `$XDG_DATA_HOME/phasmid-profile-manager/` (by default
+`~/.local/share/phasmid-profile-manager/`). `phasmid-pm --desktop` uses the same
+data folder but keeps the `--host` and `--port` flags. Plain `phasmid-pm` and its
+administration commands use `data/profiles.db`; set `PPM_DB_PATH` explicitly to
+manage the desktop database from the CLI. See
+[where data lives](getting-started.md#where-data-lives).
 
 ## `phasmid-pm user`
 
@@ -91,23 +92,19 @@ want to wait out. Check `leases` first — force-releasing a lease that is still
 live lets a second browser open a profile that is already running, which is the
 corruption the lease prevents. There is deliberately no API endpoint for it.
 
-## `camoufox fetch`
+## Installing the browser
 
-Downloads the Camoufox browser (~300 MB). This comes from Camoufox itself, not
-from this project. Desktop and web UI users can instead click **Install browser**
-in the setup banner or use the download action in Settings, with visible
-progress and retry. The CLI is an alternative for advanced deployments.
+There is no CLI command for it. **Install browser** in the web UI (the banner on
+the Profiles page, or Settings) and `POST /api/v1/system/browser/install` start
+the same background install; see
+[Installing the browser](getting-started.md#installing-the-browser). To use a
+local Phasmid build and checkout instead, set `PPM_PHASMID_BINARY` and
+`PPM_PHASMID_SOURCE`.
 
-```bash
-camoufox fetch          # installed release
-uv run camoufox fetch   # from source
-```
-
-Without it the app still runs: you can create, edit, group, import and export
-profiles, and browse the device presets. Launching a browser and pinning a
-preset to a device are the two things that need the binary — the Settings screen
-says so when it is missing. The in-app installer also prepares support files
-that normal profile launch needs.
+Without the browser the app still runs: you can create, edit, group, import and
+export profiles. Launching, generating a machine, listing GPUs and placing a
+proxy's exit address need it; a profile created before it is installed gets its
+machine on its first launch.
 
 ## Scripts
 
@@ -116,8 +113,9 @@ These live in `scripts/` and are for working on the project, not for daily use.
 | Command | What it does |
 | ------- | ------------ |
 | `python scripts/build_webui.py` | Builds the Next.js UI as a static export and copies it into the package, so `phasmid-pm` can serve it. Needs Node.js 20.9+. |
-| `python scripts/build_desktop.py --package` | Builds a standalone desktop bundle and platform installer. See [releasing.md](releasing.md) for build tools. |
-| `python examples/seed_demo.py` | Creates a handful of demo profiles for a look around. |
+| `python scripts/kill_browsers.py` | Force-closes every running process started with `--phasmid-profile` (Phasmid browsers and the proxyroute in front of them), for cleanup after a crash. A normal Chrome is left alone. |
+| `python examples/seed_demo.py` | Creates a few demo profiles in `demo_data/profiles.db`. |
+| `python scripts/migrate_data.py` | Copies the profiles and groups from `demo_data/` into `data/`. |
 
 ## Running from source without the console script
 

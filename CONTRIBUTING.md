@@ -1,22 +1,27 @@
 # Contributing
 
-Thanks for your interest in improving Phasmid Profile Manager! This document
+Thanks for your interest in improving Phasmid Profile Manager. This document
 describes how to set up a development environment and the conventions we follow.
+
+Problems with what the browser itself reports belong to
+[Phasmid](https://github.com/tintty1/phasmid), not here.
 
 ## Development setup
 
-The backend uses [uv](https://docs.astral.sh/uv/) and targets Python 3.10+.
+The backend uses [uv](https://docs.astral.sh/uv/) and needs Python 3.12 or
+newer, because Phasmid's genprofile does. It runs on Linux x64 only.
 
 ```bash
-# Install dependencies (including dev and the optional Chrome-migration extra)
-uv sync --extra dev --extra chrome-migration
-
-# Download the Camoufox browser binary (needed for browser tests)
-uv run camoufox fetch
+uv sync --extra dev
 ```
 
-The frontend is a Next.js app in `web/`. It needs Node.js 20.19+ — ESLint 10's
-floor; building the bundle alone works from 20.9:
+For the browser tests you need a Phasmid build and a checkout of the same
+version, and the DB-IP database genprofile caches. The simplest way to get all
+three is to run the app once and click **Install browser**; the release is then
+in `data/phasmid/<tag>/browser/chrome` and `data/phasmid/<tag>/source`.
+
+The frontend is a Next.js app in `web/`. It needs Node.js 20.19+ (ESLint 10's
+floor); building the bundle alone works from 20.9:
 
 ```bash
 cd web
@@ -30,20 +35,24 @@ Please make sure the following pass before opening a pull request:
 
 ```bash
 # Backend
-uv run ruff check src tests        # lint
-uv run ruff format --check src tests  # formatting
-uv run mypy src/phasmid_pm        # type-check
-uv run pytest -m "not browser"     # fast tests (no browser)
-uv run pytest -m browser           # opt-in: real Camoufox launch
+uv run ruff check src tests            # lint
+uv run ruff format --check src tests   # formatting
+uv run mypy src/phasmid_pm             # type-check
+uv run pytest -m "not browser"         # fast tests, no browser
+
+# Opt-in: real Phasmid launches
+PPM_PHASMID_BINARY=/path/to/chrome PPM_PHASMID_SOURCE=/path/to/phasmid \
+    uv run pytest -m browser --no-network
 
 # Frontend
 cd web && npm run lint && npm run build
 ```
 
-CI runs the same checks on Python 3.10–3.13.
+CI runs the backend checks on Python 3.12 and 3.13, and the frontend lint, build,
+static export and UI smoke tests (`web/tests/stage_one_ui.py`).
 
 To work on the single-process mode (`phasmid-pm`), build the UI into the package
-first — otherwise the server has nothing to serve:
+first, otherwise the server has nothing to serve:
 
 ```bash
 uv run python scripts/build_webui.py
@@ -51,76 +60,61 @@ uv run python scripts/build_webui.py
 
 ## Testing conventions
 
-- **`-m browser` means the test needs the browser binary**, not merely that it is
-  slow. Anything that launches Camoufox *or* resolves a fingerprint belongs
-  there; CI does not run `camoufox fetch`, so an unmarked test that needs it will
-  fail there while passing on your machine.
-- **Check the no-browser path too.** Much of the app must work before
-  `camoufox fetch` has run. The quickest way to see what CI sees:
+- **`-m browser` means the test needs a real Phasmid**, not merely that it is
+  slow. The fast suite replaces the browser with a fake executable and genprofile
+  with a fake generator (`tests/fakes.py`, `tests/conftest.py`), and answers the
+  exit-address lookup locally. Anything that needs the real binary or the real
+  genprofile belongs under `-m browser`; CI does not install Phasmid, so an
+  unmarked test that needs it fails there while passing on your machine. Browser
+  tests skip themselves unless `PPM_PHASMID_BINARY` and `PPM_PHASMID_SOURCE` are
+  set and the DB-IP database is cached.
+- **The browser suite runs offline. Keep it that way.** Pages come from a
+  loopback server ([tests/browser/support.py](tests/browser/support.py)), and the
+  exit address a launch would look up is answered locally. A new test that
+  reaches the internet would make the suite fail on someone else's rate limit;
+  if one truly needs to, say why in the test. `--no-network` refuses any
+  connection off this machine from the test process:
 
   ```bash
-  HOME=$(mktemp -d) uv run pytest -m "not browser"
+  uv run pytest -m browser --no-network
   ```
 
-- **The browser suite runs offline. Keep it that way.** It used to load
-  `example.com` and `iana.org`, and launching asked the internet for this
-  machine's public address, so a run could fail on a rate limit and look like a
-  product bug — one full run failed three tests and passed all twenty on the next
-  attempt with nothing changed. Now the pages come from a loopback server
-  ([tests/browser/support.py](tests/browser/support.py)) and the exit address is
-  named instead of looked up. A new test that reaches the internet brings that
-  back; if one truly needs to, say why in the test. The claim is a command
-  rather than a promise:
-
-  ```bash
-  uv run pytest -m browser --no-network   # refuses any connection off this machine
-  ```
-
-  Two things to know about its reach. It guards the *test* process; the browser
-  is a child of its own, and what keeps its page loads local is that the tests
-  only ever hand it loopback URLs. And it will refuse the one-off downloads a
-  cold machine still needs — Camoufox fetches uBlock Origin into its addon cache
-  the first time anything launches, alongside `camoufox fetch` for the browser
-  itself. Both are once per machine, not per run; warm them first, as you would
-  before running this suite at all.
-- **Prefer tests that observe real behaviour.** The fingerprint tests launch a
-  browser and read what a page would actually see, rather than asserting on the
-  options passed in. When a test guards a premise about Camoufox's behaviour, say
-  so — `test_unpinned_profiles_look_like_new_hardware` exists to fail loudly if
-  upstream ever changes.
+  It guards the test process only. The browser is a child process of its own,
+  and what keeps its page loads local is that the tests only ever hand it
+  loopback URLs.
+- **Prefer tests that observe real behaviour.** The browser tests launch Phasmid
+  and read what a page actually sees (platform, cores, memory, languages,
+  screen, timezone, `navigator.webdriver`), rather than asserting on the
+  command line passed in.
 - **A test should be able to fail.** Coverage is a way of finding untested
-  behaviour, not a target: a test that asserts a getter returns what was set
-  costs time on every run and catches nothing. Name the behaviour in the test
-  name, and when the test exists because something once broke, say in a docstring
-  what broke.
+  behaviour, not a target. Name the behaviour in the test name, and when the
+  test exists because something once broke, say in a docstring what broke.
 
 ### What is deliberately not covered
 
-Two modules are left untested on purpose, so nobody spends an afternoon
-rediscovering why:
-
-- **`desktop.py`** composes uvicorn and pywebview and has no logic of its own
-  beyond a connect-retry loop. pywebview is an optional extra that CI does not
-  install, so a test would have to stand in for every call it makes and would
-  then only assert that the stand-ins were called in order. The thing that can
-  actually break here — the window opening at all — is not observable without a
-  display.
+- **`desktop.py`** composes uvicorn and pywebview and has little logic of its
+  own. pywebview is an optional extra that CI does not install, and the thing
+  that can actually break here, the window opening at all, is not observable
+  without a display.
 - **The FastAPI lifespan in `main.py`** builds the storage and profile manager
   from the settings on startup. The integration tests inject their own instead,
   which is what lets each of them have a throwaway database.
+- **`core/genprofile_driver.py`** runs inside the Phasmid source tree, where
+  genprofile is importable. It is excluded from mypy, the unit tests replace it
+  with a stand-in script, and only the browser tests run it for real.
 
-The remaining uncovered lines are mostly `except Exception -> 500` handlers,
-which exist for failures that cannot be provoked without breaking SQLite
-underneath the process, and `fingerprint_store.resolve()`, which needs the
-browser binary and is covered by the `browser`-marked tests.
+Most remaining uncovered lines are `except Exception -> 500` handlers, which
+exist for failures that cannot be provoked without breaking SQLite underneath
+the process.
 
 ## Project layout
 
-- `src/phasmid_pm/` — the Python package (core logic, REST API).
-- `web/` — the Next.js web interface.
-- `extras/chrome_migration/` — optional Chrome → Camoufox migration module.
-- `tests/` — unit, integration, and opt-in browser tests.
-- `scripts/`, `examples/` — utilities and runnable examples.
+- `src/phasmid_pm/`: the Python package (core logic, REST API, CDP and VNC
+  relays).
+- `web/`: the Next.js web interface.
+- `tests/`: unit, integration, and opt-in browser tests.
+- `skills/`: the agent skill and its helper script.
+- `scripts/`, `examples/`: utilities and runnable examples.
 
 ## Coding conventions
 
@@ -132,12 +126,12 @@ browser binary and is covered by the `browser`-marked tests.
 
 ## Pull requests
 
-1. Fork the repository and create a feature branch.
+1. Create a feature branch.
 2. Make your change with tests where it makes sense.
 3. Run the checks above.
 4. Open a pull request describing the change and its motivation.
 
 ## Reporting bugs
 
-Open an issue using the bug-report template. Include the version, your OS, and
-steps to reproduce.
+Open an issue using the bug-report template. Include the version, the Phasmid
+release (Settings shows it), your Linux distribution, and steps to reproduce.

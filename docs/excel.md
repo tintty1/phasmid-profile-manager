@@ -1,17 +1,18 @@
 # Excel import / export
 
 Bulk-edit profiles in a spreadsheet. For moving a *single* profile between
-machines — with its cookies and pinned fingerprint — use the profile archive
-instead ([profile-settings.md](profile-settings.md#moving-a-profile)); a
-spreadsheet carries settings only.
+machines, with its cookies and its machine, use the profile archive instead
+([profile-settings.md](profile-settings.md#moving-a-profile)); a spreadsheet
+carries settings only.
 
 ## Export
 
 - **Web UI:** the download icon in the toolbar on the Profiles page.
 - **API:** `GET /api/v1/profiles/export/excel`
 
-Each row is a profile. The header row carries help text and key columns have
-dropdown validation, so the file doubles as a template.
+Each row is a profile. The header cells carry help text as comments, and the
+status, OS, WebRTC policy and proxy type columns have dropdown validation, so the
+file doubles as a template.
 
 > **The file contains proxy passwords in clear text.** It has to, for import to
 > restore them. Store it as carefully as you would store the passwords. The UI
@@ -20,39 +21,35 @@ dropdown validation, so the file doubles as a template.
 ## Import
 
 - **Web UI:** the upload icon in the toolbar.
-- **API:** `POST /api/v1/profiles/import/excel` (multipart file upload)
+- **API:** `POST /api/v1/profiles/import/excel` (multipart file upload, `.xlsx`
+  or `.xls`)
 
-Import **always creates new profiles** with fresh IDs — it never updates existing
-ones. That keeps IDs unique and avoids overwriting a profile by accident. The
-response reports how many were created and any per-row errors.
+Import **always creates new profiles** with fresh IDs; it never updates
+existing ones. The response reports how many were created and any per-row
+errors. Columns are found by their header text, so they can be reordered or
+removed; only *Profile name* is required.
 
-Imported profiles have no pinned machine: the spreadsheet does not carry one.
-Each gets its fingerprint on first launch, or you can pin a real device by
-creating the profile through the UI instead.
+Imported profiles have no machine: the spreadsheet does not carry one, and
+generating a hundred machines would make the import wait on genprofile for each
+row. Each profile gets its machine on its first launch, from the row's OS and
+GPU, placed at its exit address.
 
 ## Columns
 
 | Column | Notes |
 | ------ | ----- |
-| Profile ID | Read-only. Written on export, ignored on import. |
+| Profile ID | Written on export, ignored on import. |
 | Profile name | Required. |
-| Group | Group name. |
-| Status | `active`, `inactive`, `blocked`, `maintenance`. |
-| Operating system | `windows`, `macos`, `linux`. |
-| Screen resolution | e.g. `1920x1080`. Stored and shown; Camoufox derives the real screen itself. |
-| Window width / Window height | Browser window size. |
-| Browser languages | Comma-separated, e.g. `en-US, en`. |
-| Timezone | e.g. `Europe/Berlin`. |
-| Locale | e.g. `en_US`. |
-| WebRTC mode | `replace`, `real`, `forward`, `none`. `none` disables WebRTC. |
-| Canvas noise / WebGL noise / Audio noise | Stored intent; Camoufox owns this spoofing. |
-| Stable canvas | `true` keeps the canvas identical across launches, at the cost of being identical across sites too. Off by default — see [profile-settings.md](profile-settings.md#known-limitations). |
-| CPU cores | Reported as `navigator.hardwareConcurrency`. |
-| Device memory | Stored; not all values map onto Camoufox. |
-| Touch points | Stored, but Camoufox 152 ignores it — see the limitations in [profile-settings.md](profile-settings.md#known-limitations). |
-| Proxy type | `http`, `https`, `socks4`, `socks5`. |
-| Proxy server | `host:port`. |
-| Proxy username / Proxy password | Firefox cannot authenticate to a SOCKS proxy — use HTTP/HTTPS when credentials are needed. |
-| Geolocation mode | `auto` follows the proxy IP; `manual` uses the coordinates below. |
-| Latitude / Longitude / Geolocation accuracy | Used when the mode is `manual`. |
+| Group | The group's ID, as exported. Empty for none. |
+| Status | `active`, `inactive`, `blocked`, `maintenance`. Empty means `active`. |
+| Operating system | `linux` or `windows`. Empty means `linux`. |
+| GPU | `<vendor_id>:<device_id>`, e.g. `0x10de:0x2504`, from `GET /api/v1/fingerprints/gpus`. Empty: genprofile draws one. |
+| Browser languages | Comma-separated, e.g. `en-US, en`. Empty: follow the proxy. |
+| Timezone | IANA name, e.g. `Europe/Berlin`. Empty: follow the proxy. |
+| WebRTC policy | `default`, `default_public_interface_only`, `default_public_and_private_interfaces` or `disable_non_proxied_udp`. Empty means `default`. |
+| Proxy type | `http`, `https`, `socks5`. Empty for no proxy. `socks4` imports but cannot launch. |
+| Proxy server | `host:port`. Empty for no proxy. |
+| Proxy username / Proxy password | Optional. |
 | Notes | Free text. |
+
+What each setting does is in [profile-settings.md](profile-settings.md#settings).

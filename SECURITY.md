@@ -81,3 +81,42 @@ What protects a session:
   answered and how fast. On an instance reachable beyond localhost without any
   authentication configured, that is an unauthenticated way to probe hosts and
   ports the server can reach but the caller cannot.
+
+## Running browsers
+
+- **The CDP relay is full control.** A client connected to
+  `/api/v1/profiles/{id}/cdp` can do anything the browser can: read every
+  cookie and saved login, and act as the account. It is guarded by the same
+  authentication as the API, plus an Origin check against cross-site pages.
+- **Chrome's own CDP port is unauthenticated.** Each browser listens on a
+  loopback port it picks (`--remote-debugging-port=0`, written to
+  `DevToolsActivePort` in the profile directory). Any process on this host that
+  finds the port can drive the browser without going through the relay. Do not
+  run the manager on a host shared with users you do not trust.
+- **proxyroute's relay listener is too.** For a proxy with credentials,
+  proxyroute opens a SOCKS5 listener on loopback without authentication, so any
+  local user can use the proxy, with its credentials, while the browser runs
+  (see Phasmid's `tools/proxyroute/README.md`).
+- Proxy credentials are never put on a command line: they are written to
+  `<data dir>/run/<id>/proxy-args` (mode 0600, in a 0700 directory) and passed
+  as `@file`. The run directory is removed when the session ends.
+- The VNC displays listen on loopback with no password; the web UI reaches them
+  only through the authenticated `/api/v1/profiles/{id}/vnc` relay.
+
+## What the app downloads and contacts
+
+- **Install browser** downloads a Phasmid release archive from GitHub and checks
+  it against the `.sha256` published in the same release. That detects a
+  corrupted download, not a compromised release. The source tree at the same
+  tag is downloaded from GitHub over TLS with no further check, and its
+  `tools/genprofile` and `tools/proxyroute` run with the app's own Python
+  interpreter. Archives are unpacked with tarfile's `data` filter, which refuses
+  absolute paths, `..`, device files and links leaving the archive. genprofile
+  downloads its DB-IP database and checks it against the SHA-256 pinned in the
+  source tree.
+- **Every launch and every proxy check** asks a plain-text IP echo service,
+  through the profile's proxy, for the exit address: `api.ipify.org`, then
+  `checkip.amazonaws.com`, then `icanhazip.com`, over verified TLS. Without a
+  proxy that reveals this computer's public address to those services.
+- **The update check** asks the GitHub API for this project's latest release.
+

@@ -32,18 +32,26 @@ That runs the static export and copies `out/` into `src/phasmid_pm/webui/`.
 ```
 src/
   app/
-    page.tsx           Profiles — the main registry
-    groups/page.tsx    Groups
-    settings/page.tsx  Effective configuration and usage
-    layout.tsx         Fonts, shell and toasts
-    globals.css        Design tokens and component classes
+    page.tsx             Profiles: the main registry, launch menu, row actions
+    groups/page.tsx      Groups
+    schedules/page.tsx   Scheduled launches
+    trash/page.tsx       Trash: restore or delete permanently
+    settings/page.tsx    Effective configuration, browser install, backups, updates
+    layout.tsx           Fonts, shell and toasts
+    globals.css          Design tokens and component classes
+    fonts.css            IBM Plex, self-hosted through @fontsource
   components/
-    app-shell.tsx      Fixed rail + work area
-    profile-form.tsx   Create and edit a profile (one form, both modes)
-    modal.tsx          Dialog shell and confirm dialog
-    toast.tsx          Non-blocking notifications
-    empty-state.tsx    First-run and no-results states
-  lib/api.ts           Typed API client
+    app-shell.tsx        Fixed rail + work area
+    profile-form.tsx     Create and edit a profile; the Machine panel and its JSON view
+    browser-setup.tsx    The Install browser banner
+    browser-viewer.tsx   noVNC viewer for a profile's virtual display
+    recovery-settings.tsx  Backups and the update check
+    login-gate.tsx       Login screen when accounts exist
+    modal.tsx            Dialog shell and confirm dialog (dialogs stack)
+    toast.tsx            Non-blocking notifications
+    empty-state.tsx      First-run and no-results states
+  lib/api.ts             Typed API client
+tests/stage_one_ui.py    UI smoke tests, run by CI with Playwright's Chromium
 ```
 
 ## Design
@@ -56,11 +64,11 @@ meaning instead of decoration.
   so the table reads as a status board.
 - **Hairlines, not boxes.** Rows and sections are separated by 1px rules rather
   than nested cards.
-- **Monospace for machine values.** IDs, proxies and coordinates are mono so they
+- **Monospace for machine values.** IDs, proxies and addresses are mono so they
   align and stay scannable; prose is IBM Plex Sans.
 - **Restraint in motion.** Rows stagger in once on load and the running dot
   pulses. Everything respects `prefers-reduced-motion`.
 
 Tokens live in `@theme` in `globals.css`; there is no Tailwind config file
-(Tailwind v4 reads the CSS). Fonts are pulled in by `next/font`, which self-hosts
-them at build time so the desktop bundle works offline.
+(Tailwind v4 reads the CSS). Fonts come from the `@fontsource` packages and are
+bundled with the build, so the UI works offline.

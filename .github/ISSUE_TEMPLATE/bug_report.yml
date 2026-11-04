@@ -33,11 +33,11 @@ body:
   - type: dropdown
     id: os
     attributes:
-      label: Operating system
+      label: Where it runs
       options:
-        - macOS
-        - Windows
-        - Linux
+        - Linux, from source
+        - Linux, desktop window
+        - Docker
     validations:
       required: true
   - type: textarea

@@ -1,6 +1,6 @@
 ---
 name: phasmid-profile-manager
-description: Create, copy (clone) and destroy persistent anti-detect browser profiles in Phasmid Profile Manager (phasmid-pm), and browse the web as one of them with Playwright over its CDP URL (chromium.connect_over_cdp). Use this whenever a task involves Phasmid, phasmid-pm, a "browser profile", an anti-detect or fingerprinted browser, a profile manager on localhost:8000, or doing something on a website as a specific saved account/identity — even if the user only says "log in with profile X", "make three copies of shop-de-01", "delete the test profiles", or "open this page from the Tokyo profile".
+description: Create, copy (clone) and destroy persistent anti-detect browser profiles in Phasmid Profile Manager (phasmid-pm), browse the web as one of them with Playwright over its CDP URL (chromium.connect_over_cdp), and get the files it downloads. Use this whenever a task involves Phasmid, phasmid-pm, a "browser profile", an anti-detect or fingerprinted browser, a profile manager on localhost:8000, or doing something on a website as a specific saved account/identity — even if the user only says "log in with profile X", "make three copies of shop-de-01", "delete the test profiles", or "open this page from the Tokyo profile".
 ---
 
 # Phasmid Profile Manager
@@ -67,15 +67,28 @@ python scripts/ppm.py create gpu-pick --os linux --gpu 0x10de:0x2504 --protected
 ## Copy a profile
 
 ```bash
-python scripts/ppm.py clone shop-de-01 shop-de-02
+python scripts/ppm.py clone shop-de-01 shop-de-02             # with its data
+python scripts/ppm.py clone shop-de-01 shop-de-03 --no-data   # settings only
 ```
 
-A clone copies the settings, the proxy and the browser data (cookies, logins,
-storage; caches are left behind), and gets **new hardware** — that is right for
-a second account. `--same-machine` keeps the hardware too, which makes the two
-profiles provably one computer to any site that sees both; use it only when the
-user means "move/duplicate this exact machine". Both copies share the source's
-proxy, so give the clone its own before running both:
+Two choices, independent of each other:
+
+| | copied | new |
+| --- | --- | --- |
+| **Data** (cookies, logins, storage, history, saved passwords) | default | `--no-data`: a fresh browser, logged out everywhere |
+| **Hardware** (the machine sites see) | `--same-machine` | default |
+
+Settings and the proxy are always copied; caches and downloads never are.
+
+- **With data** (the default): a copy of a logged-in profile is logged in too —
+  the same session, now in two places. Use it to duplicate a warmed-up setup.
+- **`--no-data`**: the right choice for a new account that should share only
+  the configuration (OS, GPU choice, languages, proxy).
+- **`--same-machine`** makes the two profiles provably one computer to any site
+  that sees both; use it only when the user means "this exact machine again".
+
+Both copies share the source's proxy, so give the clone its own before running
+both:
 
 ```bash
 python scripts/ppm.py update shop-de-02 --json \
@@ -140,18 +153,24 @@ from playwright.async_api import async_playwright
 API = os.environ.get("PPM_URL", "http://127.0.0.1:8000") + "/api/v1"
 KEY = os.environ.get("PPM_API_KEY")
 
+
 def call(method, path, body=None):
-    req = urllib.request.Request(API + path, method=method,
+    req = urllib.request.Request(
+        API + path,
+        method=method,
         data=json.dumps(body).encode() if body is not None else None,
-        headers={"Content-Type": "application/json", **({"X-API-Key": KEY} if KEY else {})})
+        headers={"Content-Type": "application/json", **({"X-API-Key": KEY} if KEY else {})},
+    )
     with urllib.request.urlopen(req, timeout=300) as resp:
         return json.loads(resp.read() or b"null")
+
 
 async def main(profile_id):
     launch = call("POST", f"/profiles/{profile_id}/launch", {"mode": "headless"})
     async with async_playwright() as p:
         browser = await p.chromium.connect_over_cdp(
-            launch["cdp_endpoint"], headers={"x-api-key": KEY} if KEY else None)
+            launch["cdp_endpoint"], headers={"x-api-key": KEY} if KEY else None
+        )
         context = browser.contexts[0]
         page = context.pages[0] if context.pages else await context.new_page()
         await page.goto("https://example.com/login")
@@ -159,8 +178,9 @@ async def main(profile_id):
         await page.click("button[type=submit]")
         await page.wait_for_load_state("networkidle")
         print(await page.title())
-        await browser.close()                       # disconnect only
-    call("POST", f"/profiles/{profile_id}/close")   # stop, if you started it
+        await browser.close()  # disconnect only
+    call("POST", f"/profiles/{profile_id}/close")  # stop, if you started it
+
 
 asyncio.run(main("shop-de-01-id"))
 ```
@@ -168,7 +188,9 @@ asyncio.run(main("shop-de-01-id"))
 Or from Python with the helper, which does launch/connect/disconnect for you:
 
 ```python
-import sys; sys.path.insert(0, "<this skill>/scripts")
+import sys
+
+sys.path.insert(0, "<this skill>/scripts")
 from ppm import open_profile
 
 async with open_profile("shop-de-01", mode="headless", stop_on_exit=True) as (page, context, info):
@@ -180,6 +202,52 @@ Modes (`python scripts/ppm.py modes` shows what this server offers):
 watch and take over in the web UI (pick it when a CAPTCHA, 2FA or a login only
 the user can finish may come up); `window` — a real window on the server's
 desktop, only when asked. An already-running profile keeps its mode.
+
+## Get downloaded files
+
+Each profile downloads into a folder of its own **on the server** (not the
+agent's machine, not `~/Downloads`), and the API serves it:
+
+```bash
+python scripts/ppm.py downloads shop-de-01                  # newest first: name, size, complete
+python scripts/ppm.py fetch shop-de-01 report.csv -o ./report.csv
+python scripts/ppm.py rm-download shop-de-01 report.csv
+```
+
+In Python, `open_profile` already routes downloads to that folder. Trigger the
+download, wait for it, then fetch it through the API:
+
+```python
+from ppm import open_profile, wait_for_download, fetch_download
+
+async with open_profile("shop-de-01") as (page, context, info):
+    await page.goto("https://example.com/reports")
+    async with page.expect_download() as pending:
+        await page.click("text=Export CSV")
+    name = (await pending.value).suggested_filename
+    await wait_for_download("shop-de-01", name)  # until it is complete
+    fetch_download("shop-de-01", name, "./report.csv")
+```
+
+- **Never trust `download.save_as()` / `download.path()` here.** Over
+  `connect_over_cdp` they read a path on the agent's machine; with the browser
+  in Docker or elsewhere, `save_as()` writes an *empty* file and reports
+  success. Always fetch through the API.
+- Connecting with Playwright yourself (not through `open_profile`)? Send this
+  right after `connect_over_cdp`, or Playwright sends downloads to a temporary
+  folder on your machine:
+  ```python
+  cdp = await browser.new_browser_cdp_session()
+  await cdp.send(
+      "Browser.setDownloadBehavior",
+      {"behavior": "allow", "downloadPath": launch["downloads_dir"], "eventsEnabled": True},
+  )
+  ```
+- The file keeps the site's name; a second file of the same name becomes
+  `name (1).ext`. Take the name from `suggested_filename` or the newest entry.
+  `complete: false` (a `.crdownload` file) means Chrome is still writing it.
+- Downloads are not in exports, backups or clones. Destroying (purging) the
+  profile deletes them.
 
 ## Things that will bite you
 

@@ -16,7 +16,9 @@ Shell (stdlib only, prints JSON):
   ppm.py machine ID_OR_NAME                            the whole Phasmid profile JSON
   ppm.py protect ID_OR_NAME                            (refuse delete / new machine)
   ppm.py update ID_OR_NAME --json '{"notes": "..."}'   (sends row_version for you)
-  ppm.py clone ID_OR_NAME NEW_NAME [--same-machine]   (new hardware unless --same-machine)
+  ppm.py clone ID_OR_NAME NEW_NAME [--same-machine] [--no-data]
+                                                       (new hardware unless --same-machine;
+                                                        cookies/logins copied unless --no-data)
   ppm.py delete ID_OR_NAME                             (moves to Trash; recoverable)
   ppm.py trash                                         profiles in Trash
   ppm.py restore ID_OR_NAME                            back out of Trash
@@ -25,9 +27,12 @@ Shell (stdlib only, prints JSON):
   ppm.py launch ID_OR_NAME [--mode headless|virtual|window]
   ppm.py close ID_OR_NAME
   ppm.py active
+  ppm.py downloads ID_OR_NAME                          files the profile downloaded, newest first
+  ppm.py fetch ID_OR_NAME FILE [-o PATH]               copy one to this machine (default ./FILE)
+  ppm.py rm-download ID_OR_NAME FILE
 
 Python (needs playwright; any recent version speaks CDP):
-  from ppm import open_profile
+  from ppm import open_profile, fetch_download
   async with open_profile("shop-de-01", mode="headless") as (page, context, info):
       await page.goto("https://example.com")
 """
@@ -57,8 +62,8 @@ class PpmError(RuntimeError):
         self.status, self.code, self.message = status, code, message
 
 
-def request(method: str, path: str, body: Any = None, **query: Any) -> Any:
-    """Call the API and return the decoded JSON body; raise PpmError on failure."""
+def request(method: str, path: str, body: Any = None, raw: bool = False, **query: Any) -> Any:
+    """Call the API and return the decoded JSON body (bytes with raw); raise PpmError."""
     params = {k: v for k, v in query.items() if v is not None}
     url = f"{API}{path}" + (f"?{urllib.parse.urlencode(params)}" if params else "")
     headers = {"Accept": "application/json"}
@@ -71,7 +76,7 @@ def request(method: str, path: str, body: Any = None, **query: Any) -> Any:
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
     try:
         with urllib.request.urlopen(req, timeout=300) as resp:
-            raw = resp.read()
+            content = resp.read()
     except urllib.error.HTTPError as exc:
         try:
             error = json.loads(exc.read()).get("error", {})
@@ -82,7 +87,9 @@ def request(method: str, path: str, body: Any = None, **query: Any) -> Any:
         ) from None
     except urllib.error.URLError as exc:
         raise PpmError(0, "unreachable", f"cannot reach {BASE}: {exc.reason}") from None
-    return json.loads(raw) if raw else None
+    if raw:
+        return content
+    return json.loads(content) if content else None
 
 
 def resolve(id_or_name: str) -> dict[str, Any]:
@@ -131,6 +138,41 @@ def destroy(id_or_name: str) -> dict[str, Any]:
     return {"destroyed": profile["id"], "name": profile["name"]}
 
 
+def list_downloads(id_or_name: str) -> list[dict[str, Any]]:
+    """The profile's downloaded files, newest first: name, size, modified, complete."""
+    return request("GET", f"/profiles/{resolve(id_or_name)['id']}/downloads")["files"]
+
+
+def fetch_download(id_or_name: str, name: str, dest: str | None = None) -> str:
+    """Copy one downloaded file from the server to ``dest`` (default ./name); returns the path.
+
+    The only reliable way to get a download when the browser runs on another
+    machine or in Docker: Playwright's download.save_as() reads a path on the
+    agent's machine and, for a remote browser, quietly writes an empty file.
+    """
+    profile = resolve(id_or_name)
+    quoted = urllib.parse.quote(name, safe="")
+    data = request("GET", f"/profiles/{profile['id']}/downloads/{quoted}", raw=True)
+    path = dest or name
+    with open(path, "wb") as handle:
+        handle.write(data)
+    return path
+
+
+async def wait_for_download(id_or_name: str, name: str, timeout: float = 120.0) -> dict[str, Any]:
+    """Wait until the named file is in the profile's downloads and complete."""
+    import asyncio
+
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while loop.time() < deadline:
+        for entry in list_downloads(id_or_name):
+            if entry["name"] == name and entry["complete"]:
+                return entry
+        await asyncio.sleep(0.5)
+    raise PpmError(408, "timeout", f"{name!r} did not finish downloading in {timeout:.0f}s")
+
+
 def parse_proxy(url: str) -> dict[str, Any]:
     """socks5://user:pass@host:port -> the API's proxy_config."""
     parts = urllib.parse.urlsplit(url)
@@ -157,13 +199,16 @@ def launch(id_or_name: str, mode: str | None = None) -> dict[str, Any]:
 async def open_profile(id_or_name: str, mode: str | None = None, stop_on_exit: bool = False):
     """Launch a profile and yield (page, context, launch_info) driven over CDP.
 
+    Headless unless ``mode`` says otherwise. Downloads go to the profile's own
+    folder on the server; get them with fetch_download().
+
     The context is the profile's own persistent one - its cookies, storage and
     machine. Leaving the block disconnects; the browser keeps running unless
     stop_on_exit is True (or you call close()).
     """
     from playwright.async_api import async_playwright
 
-    info = launch(id_or_name, mode)
+    info = launch(id_or_name, mode or "headless")
     endpoint = info.get("cdp_endpoint")
     if not endpoint:
         raise PpmError(503, "no_cdp", f"{info['profile_id']} has no CDP endpoint: {info}")
@@ -172,6 +217,19 @@ async def open_profile(id_or_name: str, mode: str | None = None, stop_on_exit: b
         async with async_playwright() as p:
             browser = await p.chromium.connect_over_cdp(endpoint, headers=headers)
             try:
+                # Playwright points downloads at a temporary folder on *this*
+                # machine; send them back to the profile's own folder on the
+                # server, where fetch_download() can reach them from anywhere.
+                if info.get("downloads_dir"):
+                    cdp = await browser.new_browser_cdp_session()
+                    await cdp.send(
+                        "Browser.setDownloadBehavior",
+                        {
+                            "behavior": "allow",
+                            "downloadPath": info["downloads_dir"],
+                            "eventsEnabled": True,
+                        },
+                    )
                 context = browser.contexts[0]
                 page = context.pages[0] if context.pages else await context.new_page()
                 yield page, context, info
@@ -196,10 +254,22 @@ def _main() -> None:
     p.add_argument("profile")
     p.add_argument("new_name")
     p.add_argument(
+        "--no-data",
+        action="store_true",
+        help="start the clone as a fresh browser: no cookies, logins, storage or history",
+    )
+    p.add_argument(
         "--same-machine",
         action="store_true",
         help="copy the hardware too: the two profiles become provably one computer",
     )
+    p = sub.add_parser("fetch")
+    p.add_argument("profile")
+    p.add_argument("file")
+    p.add_argument("-o", "--output", help="where to write it (default ./FILE)")
+    p = sub.add_parser("rm-download")
+    p.add_argument("profile")
+    p.add_argument("file")
     for name in ("purge", "destroy"):
         p = sub.add_parser(name)
         p.add_argument("profile")
@@ -208,7 +278,7 @@ def _main() -> None:
     p.add_argument("--search")
     p.add_argument("--group")
     p.add_argument("--status")
-    for name in ("get", "delete", "close", "protect", "machine", "restore"):
+    for name in ("get", "delete", "close", "protect", "machine", "restore", "downloads"):
         sub.add_parser(name).add_argument("profile")
     p = sub.add_parser("create")
     p.add_argument("name")
@@ -284,8 +354,19 @@ def _main() -> None:
             out = request("DELETE", f"/profiles/{resolve(args.profile)['id']}")
         elif args.cmd == "clone":
             source = resolve(args.profile)
-            body = {"new_name": args.new_name, "regenerate_fingerprint": not args.same_machine}
+            body = {
+                "new_name": args.new_name,
+                "regenerate_fingerprint": not args.same_machine,
+                "copy_data": not args.no_data,
+            }
             out = request("POST", f"/profiles/{source['id']}/clone", body)
+        elif args.cmd == "downloads":
+            out = list_downloads(args.profile)
+        elif args.cmd == "fetch":
+            out = {"saved": fetch_download(args.profile, args.file, args.output)}
+        elif args.cmd == "rm-download":
+            quoted = urllib.parse.quote(args.file, safe="")
+            out = request("DELETE", f"/profiles/{resolve(args.profile)['id']}/downloads/{quoted}")
         elif args.cmd == "trash":
             out = request("GET", "/trash/profiles")["data"]["profiles"]
         elif args.cmd == "restore":

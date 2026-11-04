@@ -111,3 +111,66 @@ async def test_closing_the_browser_from_inside_is_noticed(manager):
     assert not manager.browser_sessions.is_running(profile.id)
     assert await manager.storage.get_lease(profile.id) == (None, None)
     assert not session.run_dir.exists()
+
+
+@pytest.fixture
+def attachment_site():
+    """A page whose link answers with a CSV attachment named by the query."""
+    import http.server
+    import threading
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            name = self.path.partition("n=")[2] or "file.csv"
+            if self.path.startswith("/file"):
+                body = b"a,b\n1,2\n"
+                self.send_response(200)
+                self.send_header("Content-Type", "text/csv")
+                self.send_header("Content-Disposition", f"attachment; filename={name}")
+            else:
+                body = f'<a id=a href="/file?n={name}">get</a>'.encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):
+            pass
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{server.server_address[1]}/page?n="
+    server.shutdown()
+
+
+async def test_downloads_land_in_the_profiles_folder(manager, attachment_site):
+    from phasmid_pm.core import downloads
+
+    profile = await manager.create_profile("downloader")
+    result = await manager.launch_browser(profile.id, mode="headless")
+    folder = manager.downloads_dir(profile.id)
+    assert result["downloads_dir"] == str(folder)
+    session = manager.browser_sessions.active_sessions[profile.id]
+
+    async with async_playwright() as pw:
+        browser = await pw.chromium.connect_over_cdp(session.cdp_endpoint)
+        # What the skill's helper does: undo Playwright's client-side download folder.
+        cdp = await browser.new_browser_cdp_session()
+        await cdp.send("Browser.setDownloadBehavior", downloads.cdp_download_behavior(folder))
+        context = browser.contexts[0]
+        page = context.pages[0] if context.pages else await context.new_page()
+        await page.goto(attachment_site + "report.csv")
+        async with page.expect_download() as pending:
+            await page.click("#a")
+        download = await pending.value
+        assert download.suggested_filename == "report.csv"
+        assert await download.failure() is None
+        await browser.close()
+
+    for _ in range(50):
+        files = {f["name"]: f for f in downloads.list_files(folder)}
+        if files.get("report.csv", {}).get("complete"):
+            break
+        await asyncio.sleep(0.1)
+    assert (folder / "report.csv").read_bytes() == b"a,b\n1,2\n"

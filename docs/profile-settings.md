@@ -263,7 +263,13 @@ browser data directory into one zip (`<name>.phasmid.zip`);
 
 - The browser must be closed. Exporting a running profile, or one leased by
   another instance, is refused with `409`.
-- Chrome's disposable caches (HTTP, code, GPU and shader caches) are left out.
+- What travels: cookies, Local Storage, IndexedDB, history, bookmarks,
+  extensions and saved passwords. Cookies and passwords are encrypted with
+  Chrome's fixed "basic" key (the browser runs with `--password-store=basic`),
+  so they decrypt on another machine; that key protects nothing, which is why
+  the archive must be treated as the account itself.
+- Chrome's disposable caches (HTTP, code, GPU and shader caches) are left out,
+  and so are the profile's downloads (they live outside the data directory).
 - **The archive is not encrypted.** It contains live session cookies, saved
   logins and the proxy password.
 - The group is dropped (its id belongs to the source instance), and so is the

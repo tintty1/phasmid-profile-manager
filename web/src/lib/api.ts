@@ -264,10 +264,11 @@ export const profilesAPI = {
     return request<void>(`${API_PREFIX}/profiles/${id}`, { method: 'DELETE' })
   },
 
-  cloneProfile(id: string, newName: string): Promise<Profile> {
+  /** copyData false: settings and proxy only; the copy starts logged out everywhere. */
+  cloneProfile(id: string, newName: string, copyData = true): Promise<Profile> {
     return request<Profile>(`${API_PREFIX}/profiles/${id}/clone`, {
       method: 'POST',
-      body: JSON.stringify({ new_name: newName }),
+      body: JSON.stringify({ new_name: newName, copy_data: copyData }),
     })
   },
 

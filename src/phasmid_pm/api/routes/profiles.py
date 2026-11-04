@@ -24,6 +24,8 @@ from phasmid_pm.api.models.profiles import (
     BrowsersCloseAllResponse,
     ClearGeographyRequest,
     ClearGeographyResponse,
+    DownloadInfo,
+    DownloadListResponse,
     ProfileCloneRequest,
     ProfileCreateRequest,
     ProfileLaunchRequest,
@@ -37,7 +39,7 @@ from phasmid_pm.api.models.profiles import (
     ReconcileOsRequest,
 )
 from phasmid_pm.api.models.system import ApiResponse, ExcelImportData
-from phasmid_pm.core import proxy_check
+from phasmid_pm.core import downloads, proxy_check
 from phasmid_pm.core.browser_session import available_modes
 from phasmid_pm.core.database import StaleWriteError
 from phasmid_pm.core.excel_manager import ExcelManager
@@ -326,6 +328,7 @@ async def launch_profile(profile_id: str, request: ProfileLaunchRequest, http: R
                 if browser_session.get("cdp")
                 else None
             ),
+            downloads_dir=browser_session.get("downloads_dir"),
             launch=browser_session.get("launch", {}),
         )
 
@@ -358,7 +361,10 @@ async def clone_profile(profile_id: str, request: ProfileCloneRequest):
 
         # Clone the profile
         cloned_profile = await profile_manager.clone_profile(
-            profile_id, request.new_name, regenerate_fingerprint=request.regenerate_fingerprint
+            profile_id,
+            request.new_name,
+            regenerate_fingerprint=request.regenerate_fingerprint,
+            copy_data=request.copy_data,
         )
         if not cloned_profile:
             raise HTTPException(status_code=404, detail=f"Profile with ID {profile_id} not found")
@@ -481,6 +487,63 @@ async def get_profile_stats(profile_id: str):
     except Exception as e:
         logger.error(f"Failed to get statistics for profile {profile_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.get(
+    "/profiles/{profile_id}/downloads",
+    response_model=DownloadListResponse,
+    operation_id="list_profile_downloads",
+    summary="List a profile's downloads.",
+    description=(
+        "The files the profile's browser has downloaded, newest first. A file still "
+        "being written has complete=false. Works whether or not the browser runs."
+    ),
+)
+async def list_profile_downloads(profile_id: str):
+    manager = get_profile_manager()
+    if not await manager.get_profile(profile_id):
+        raise HTTPException(status_code=404, detail=f"Profile with ID {profile_id} not found")
+    folder = manager.downloads_dir(profile_id)
+    return DownloadListResponse(
+        profile_id=profile_id,
+        downloads_dir=str(folder),
+        files=[DownloadInfo(**entry) for entry in downloads.list_files(folder)],
+    )
+
+
+@router.get(
+    "/profiles/{profile_id}/downloads/{name}",
+    operation_id="get_profile_download",
+    summary="Fetch a downloaded file.",
+    description="The file's bytes, as an attachment. 404 for a name not in the folder.",
+)
+async def get_profile_download(profile_id: str, name: str):
+    manager = get_profile_manager()
+    if not await manager.get_profile(profile_id):
+        raise HTTPException(status_code=404, detail=f"Profile with ID {profile_id} not found")
+    try:
+        path = downloads.resolve_file(manager.downloads_dir(profile_id), name)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=f"No download named {name!r}") from e
+    return FileResponse(path, filename=path.name, media_type="application/octet-stream")
+
+
+@router.delete(
+    "/profiles/{profile_id}/downloads/{name}",
+    response_model=ApiResponse[None],
+    operation_id="delete_profile_download",
+    summary="Delete a downloaded file.",
+)
+async def delete_profile_download(profile_id: str, name: str):
+    manager = get_profile_manager()
+    if not await manager.get_profile(profile_id):
+        raise HTTPException(status_code=404, detail=f"Profile with ID {profile_id} not found")
+    try:
+        path = downloads.resolve_file(manager.downloads_dir(profile_id), name)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=f"No download named {name!r}") from e
+    path.unlink()
+    return ApiResponse(success=True, message=f"Deleted {name}", data=None)
 
 
 @router.get(

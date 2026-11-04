@@ -10,7 +10,7 @@ from loguru import logger
 
 from phasmid_pm.config import get_settings
 
-from . import browser_install, machine, profile_archive, proxy_check
+from . import browser_install, downloads, machine, profile_archive, proxy_check
 from .browser_session import BrowserLaunchError, BrowserSessionManager, reap_orphan
 from .database import StaleWriteError, StorageManager
 from .launch import build_plan
@@ -289,6 +289,10 @@ class ProfileManager:
                 raise ProfileProtected(profile_id, "moved to Trash")
             return False
 
+    def downloads_dir(self, profile_id: str) -> Path:
+        """Where the profile's browser saves downloads (core/downloads.py)."""
+        return downloads.downloads_dir(self.data_dir, profile_id)
+
     async def list_trashed_profiles(self) -> list[Profile]:
         return await self.storage.list_profiles({"trashed": True})
 
@@ -313,6 +317,9 @@ class ProfileManager:
             path = profile_data_path(self, profile)
             if path.exists():
                 await run_file_operation(shutil.rmtree, path)
+            folder = self.downloads_dir(profile_id)
+            if folder.exists():
+                await run_file_operation(shutil.rmtree, folder)
             return await self.storage.delete_profile(profile_id)
 
     async def list_profiles(
@@ -338,17 +345,33 @@ class ProfileManager:
         return profiles
 
     async def clone_profile(
-        self, source_id: str, new_name: str, regenerate_fingerprint: bool = True
+        self,
+        source_id: str,
+        new_name: str,
+        regenerate_fingerprint: bool = True,
+        copy_data: bool = True,
     ) -> Profile | None:
         if not await self.get_profile(source_id):
             return None
         async with profile_operation(self, source_id):
-            return await self._clone_profile_unlocked(source_id, new_name, regenerate_fingerprint)
+            return await self._clone_profile_unlocked(
+                source_id, new_name, regenerate_fingerprint, copy_data
+            )
 
     async def _clone_profile_unlocked(
-        self, source_id: str, new_name: str, regenerate_fingerprint: bool = True
+        self,
+        source_id: str,
+        new_name: str,
+        regenerate_fingerprint: bool = True,
+        copy_data: bool = True,
     ) -> Profile | None:
-        """Clone a profile."""
+        """Clone a profile.
+
+        ``copy_data`` copies the browser data directory (cookies, logins,
+        storage, history); without it the clone starts as a fresh browser with
+        the source's settings and proxy. ``regenerate_fingerprint`` gives it a
+        new machine. Downloads are never copied.
+        """
         logger.info(f"Cloning profile {source_id} -> {new_name}")
 
         source_profile = await self.get_profile(source_id)
@@ -384,10 +407,10 @@ class ProfileManager:
 
         # Copy the source profile data if it exists
         source_path = profile_data_path(self, source_profile)
-        if source_path.exists():
+        if copy_data and source_path.exists():
             try:
 
-                def copy_data():
+                def copy_tree():
                     # Caches and Chrome's run state stay behind: the locks a
                     # crash leaves are symlinks naming the old process, and the
                     # clone's first launch rebuilds every cache anyway.
@@ -401,7 +424,7 @@ class ProfileManager:
                             raise ValueError("Cannot clone profile data containing symbolic links")
                     shutil.copytree(source_path, profile_dir, dirs_exist_ok=True, ignore=disposable)
 
-                await run_file_operation(copy_data)
+                await run_file_operation(copy_tree)
                 logger.debug(f"Copied profile data from {source_path} to {profile_dir}")
             except BaseException:
                 shutil.rmtree(profile_dir, ignore_errors=True)
@@ -415,7 +438,7 @@ class ProfileManager:
             UsageStats(
                 profile_id=new_profile.id,
                 action="clone_profile",
-                details={"source_id": source_id, "new_name": new_name},
+                details={"source_id": source_id, "new_name": new_name, "copy_data": copy_data},
             )
         )
 
@@ -835,6 +858,7 @@ class ProfileManager:
                     "process_id": session.process_id,
                     "mode": session.mode,
                     "cdp": True,
+                    "downloads_dir": str(self.downloads_dir(profile_id)),
                 }
 
             data_path = profile_data_path(self, profile)
@@ -887,6 +911,10 @@ class ProfileManager:
                 )
             )
 
+            # Downloads a person starts land in the profile's own folder; an
+            # automation client re-points them over CDP (see core/downloads.py).
+            downloads.point_preferences_at(data_path, self.downloads_dir(profile_id))
+
             plan = build_plan(
                 installation,
                 profile,
@@ -920,6 +948,7 @@ class ProfileManager:
             "process_id": session.process_id,
             "mode": session.mode,
             "cdp": True,
+            "downloads_dir": str(self.downloads_dir(profile_id)),
             "launch": {
                 "process_id": session.process_id,
                 "argv": [arg for arg in plan.argv if not arg.startswith("@")],

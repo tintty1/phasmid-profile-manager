@@ -599,3 +599,102 @@ async def test_clearing_geography_rejects_an_empty_id(client):
     refused = await client.post("/api/v1/profiles/clear-geography", json={"profile_ids": [""]})
 
     assert refused.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_a_launch_points_downloads_at_the_profiles_own_folder(client):
+    import json as _json
+
+    created = await client.post("/api/profiles", json={"name": "downloader"})
+    profile_id = created.json()["id"]
+
+    launched = await client.post(f"/api/v1/profiles/{profile_id}/launch", json={"mode": "headless"})
+
+    manager = get_profile_manager()
+    folder = manager.downloads_dir(profile_id)
+    assert launched.json()["downloads_dir"] == str(folder)
+    prefs = manager.profiles_dir / f"profile_{profile_id}" / "Default" / "Preferences"
+    assert _json.loads(prefs.read_text())["download"]["default_directory"] == str(folder)
+
+
+@pytest.mark.asyncio
+async def test_downloads_are_listed_fetched_and_deleted(client):
+    created = await client.post("/api/profiles", json={"name": "downloader"})
+    profile_id = created.json()["id"]
+    folder = get_profile_manager().downloads_dir(profile_id)
+    folder.mkdir(parents=True)
+    (folder / "report.csv").write_bytes(b"a,b\n1,2\n")
+    (folder / "big.zip.crdownload").write_bytes(b"partial")
+
+    listed = (await client.get(f"/api/v1/profiles/{profile_id}/downloads")).json()
+    assert listed["downloads_dir"] == str(folder)
+    assert {f["name"]: f["complete"] for f in listed["files"]} == {
+        "report.csv": True,
+        "big.zip.crdownload": False,
+    }
+
+    fetched = await client.get(f"/api/v1/profiles/{profile_id}/downloads/report.csv")
+    assert fetched.status_code == 200
+    assert fetched.content == b"a,b\n1,2\n"
+    assert "report.csv" in fetched.headers["content-disposition"]
+
+    deleted = await client.delete(f"/api/v1/profiles/{profile_id}/downloads/report.csv")
+    assert deleted.status_code == 200
+    assert not (folder / "report.csv").exists()
+
+
+@pytest.mark.asyncio
+async def test_a_download_name_cannot_leave_the_folder(client):
+    created = await client.post("/api/profiles", json={"name": "downloader"})
+    profile_id = created.json()["id"]
+    get_profile_manager().downloads_dir(profile_id).mkdir(parents=True)
+
+    for name in ("..%2F..%2Fapi.db", "%2E%2E", ".hidden"):
+        response = await client.get(f"/api/v1/profiles/{profile_id}/downloads/{name}")
+        assert response.status_code == 404, name
+
+
+@pytest.mark.asyncio
+async def test_downloads_of_an_unknown_profile_are_a_404(client):
+    assert (await client.get("/api/v1/profiles/nope/downloads")).status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_purging_a_profile_deletes_its_downloads(client):
+    created = await client.post("/api/profiles", json={"name": "gone"})
+    profile_id = created.json()["id"]
+    folder = get_profile_manager().downloads_dir(profile_id)
+    folder.mkdir(parents=True)
+    (folder / "file.pdf").write_bytes(b"x")
+
+    await client.delete(f"/api/v1/profiles/{profile_id}")
+    purged = await client.delete(f"/api/v1/trash/profiles/{profile_id}", params={"confirm": "true"})
+
+    assert purged.status_code == 200
+    assert not folder.exists()
+
+
+@pytest.mark.asyncio
+async def test_a_clone_without_data_starts_logged_out(client):
+    created = await client.post(
+        "/api/profiles",
+        json={"name": "warm", "proxy_config": {"type": "http", "server": "1.2.3.4:8080"}},
+    )
+    source_id = created.json()["id"]
+    manager = get_profile_manager()
+    source_dir = manager.profiles_dir / f"profile_{source_id}"
+    (source_dir / "Default").mkdir(parents=True, exist_ok=True)
+    (source_dir / "Default" / "Cookies").write_bytes(b"logged in")
+
+    with_data = await client.post(f"/api/v1/profiles/{source_id}/clone", json={"new_name": "with"})
+    without = await client.post(
+        f"/api/v1/profiles/{source_id}/clone", json={"new_name": "without", "copy_data": False}
+    )
+
+    assert with_data.status_code == without.status_code == 201
+    with_dir = manager.profiles_dir / f"profile_{with_data.json()['id']}"
+    without_dir = manager.profiles_dir / f"profile_{without.json()['id']}"
+    assert (with_dir / "Default" / "Cookies").read_bytes() == b"logged in"
+    assert not (without_dir / "Default" / "Cookies").exists()
+    assert without.json()["proxy_config"]["server"] == "1.2.3.4:8080", "settings still copy"
+    assert without.json()["fingerprint"]["seed"] != created.json()["fingerprint"]["seed"]

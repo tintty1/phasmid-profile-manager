@@ -257,15 +257,21 @@ check or a launch does not make every open edit form fail to save.
 ### Other actions
 
 ```http
-POST /api/v1/profiles/{id}/clone              {"new_name": "...", "regenerate_fingerprint": true}
+POST /api/v1/profiles/{id}/clone              {"new_name": "...", "regenerate_fingerprint": true, "copy_data": true}
 POST /api/v1/profiles/{id}/reset-fingerprint
 GET  /api/v1/profiles/{id}/stats
 ```
 
-A clone copies the settings, proxy and browser data, and gets **its own
-machine** unless `regenerate_fingerprint` is false. Two profiles sharing a
-machine report the same GPU, screen, cores and seeds, which is provably one
-computer. The clone starts unprotected and unchecked.
+A clone copies the settings and proxy, and makes two independent choices:
+
+- `copy_data` (default `true`) copies the browser data: cookies, logins, Local
+  Storage, IndexedDB, history, saved passwords. With `false` the clone starts as
+  a fresh browser, logged out everywhere. Caches and downloads are never copied.
+- `regenerate_fingerprint` (default `true`) gives the clone **its own machine**.
+  Two profiles sharing a machine report the same GPU, screen, cores and seeds,
+  which is provably one computer.
+
+The clone starts unprotected and unchecked.
 
 `reset-fingerprint` generates a new machine with a new seed. Without an
 installed browser the machine is dropped and the next launch generates one.
@@ -419,6 +425,39 @@ connection).
 
 Closing the browser window yourself is detected and the session is cleaned up,
 so `/api/v1/browsers/active` reflects reality without polling.
+
+### Downloads
+
+Each profile downloads into `<data dir>/downloads/<profile id>/` on the server
+(`/data/downloads/...` in Docker, inside the volume), not into `~/Downloads`:
+
+```http
+GET    /api/v1/profiles/{id}/downloads          {"profile_id", "downloads_dir", "files": [{"name", "size", "modified", "complete"}]}
+GET    /api/v1/profiles/{id}/downloads/{name}   the file, as an attachment
+DELETE /api/v1/profiles/{id}/downloads/{name}
+```
+
+Files are listed newest first; `complete` is false while Chrome is still writing
+one (`.crdownload`). A name is the bare file name; anything that would leave the
+folder is a `404`. The folder works whether or not the browser runs, is not part
+of exports, backups or clones, and is deleted when the profile is purged.
+
+Downloads a person starts go there through the profile's
+`download.default_directory` preference, written before every launch. A CDP
+client changes that when it connects: Playwright's `connect_over_cdp` points
+downloads at a temporary folder **on the client's machine**, and with the
+browser in Docker or on another host its `download.save_as()` then writes an
+empty file. So send the profile's folder back right after connecting, and fetch
+files through the API:
+
+```python
+cdp = await browser.new_browser_cdp_session()
+await cdp.send("Browser.setDownloadBehavior", {
+    "behavior": "allow",                    # keep the site's file name
+    "downloadPath": launch["downloads_dir"], # from the launch response
+    "eventsEnabled": True,                  # so page.expect_download() still fires
+})
+```
 
 Launching a profile that another instance has open returns **`409`**. Retry once
 the holder closes the browser, or wait out `PPM_LEASE_TTL` if that instance is

@@ -195,10 +195,21 @@ class ProfileCloneRequest(BaseModel):
 
     new_name: str = Field(..., min_length=1, max_length=255)
     regenerate_fingerprint: bool = Field(True, description="Generate a new fingerprint")
+    copy_data: bool = Field(
+        True,
+        description=(
+            "Copy the browser data (cookies, logins, storage, history). False: the "
+            "clone starts as a fresh browser with the source's settings and proxy."
+        ),
+    )
 
     model_config = ConfigDict(
         json_schema_extra={
-            "example": {"new_name": "Facebook Profile 1 (copy)", "regenerate_fingerprint": True}
+            "example": {
+                "new_name": "Facebook Profile 1 (copy)",
+                "regenerate_fingerprint": True,
+                "copy_data": True,
+            }
         }
     )
 
@@ -245,6 +256,15 @@ class ProfileLaunchResponse(BaseModel):
             "CDP WebSocket of the browser: chromium.connect_over_cdp(cdp_endpoint) in "
             "Playwright, puppeteer.connect({browserWSEndpoint}). Send the API key as an "
             "x-api-key header when one is set."
+        ),
+    )
+    downloads_dir: str | None = Field(
+        None,
+        description=(
+            "Where the browser saves downloads, on the server. A CDP client should send "
+            "Browser.setDownloadBehavior {behavior: allow, downloadPath: downloads_dir} "
+            "after connecting (Playwright points downloads at its own machine otherwise), "
+            "then fetch files from GET /profiles/{id}/downloads."
         ),
     )
     launch: dict[str, Any] = Field(
@@ -408,3 +428,20 @@ class ProxyCheckResponse(BaseModel):
             ),
             findings=[ProxyFindingResponse(**asdict(f)) for f in result.findings],
         )
+
+
+class DownloadInfo(BaseModel):
+    """One file in a profile's downloads folder."""
+
+    name: str
+    size: int = Field(..., description="Bytes on disk so far")
+    modified: datetime
+    complete: bool = Field(..., description="False while Chrome is still writing it (.crdownload)")
+
+
+class DownloadListResponse(BaseModel):
+    """A profile's downloads, newest first."""
+
+    profile_id: str
+    downloads_dir: str
+    files: list[DownloadInfo]

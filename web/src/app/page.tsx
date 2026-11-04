@@ -372,10 +372,16 @@ export default function ProfilesPage() {
     }
   }
 
-  async function clone(profile: Profile) {
+  async function clone(profile: Profile, copyData = true) {
     try {
-      await profilesAPI.cloneProfile(profile.id, `${profile.name} copy`)
-      toast('ok', 'Profile cloned', `${profile.name} copy`)
+      await profilesAPI.cloneProfile(profile.id, `${profile.name} copy`, copyData)
+      toast(
+        'ok',
+        'Profile cloned',
+        copyData
+          ? `${profile.name} copy, with its cookies and logins, on new hardware`
+          : `${profile.name} copy: settings and proxy only, logged out, on new hardware`,
+      )
       loadProfiles()
     } catch (err) {
       toast('error', 'Could not clone profile', String(err))
@@ -993,6 +999,14 @@ export default function ProfilesPage() {
                               label="Duplicate"
                               onClick={() => {
                                 clone(profile)
+                                closeMenu(profile.id)
+                              }}
+                            />
+                            <MenuItem
+                              icon={<Copy size={13} />}
+                              label="Duplicate without data"
+                              onClick={() => {
+                                clone(profile, false)
                                 closeMenu(profile.id)
                               }}
                             />

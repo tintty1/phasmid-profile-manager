@@ -80,7 +80,9 @@ def main() -> None:
     try:
         out = asyncio.run(browse(args))
     except PpmError as exc:
-        print(json.dumps({"error": {"status": exc.status, "code": exc.code, "message": exc.message}}))
+        print(
+            json.dumps({"error": {"status": exc.status, "code": exc.code, "message": exc.message}})
+        )
         sys.exit(1)
     print(json.dumps(out, indent=2))
 

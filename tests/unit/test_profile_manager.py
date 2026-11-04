@@ -458,3 +458,21 @@ async def test_a_browser_another_live_instance_runs_is_left_alone(profile_manage
     assert session.process.returncode is None
     with pytest.raises(ProfileLocked):
         await profile_manager.launch_browser(profile.id, mode="headless")
+
+
+@pytest.mark.asyncio
+async def test_a_clone_leaves_caches_and_stale_locks_behind(profile_manager):
+    """A crashed Chrome leaves SingletonLock as a symlink; it must not block a clone."""
+    source = await profile_manager.create_profile(name="crashed")
+    source_dir = Path(source.get_storage_path(str(profile_manager.profiles_dir)))
+    (source_dir / "Default" / "Cache").mkdir(parents=True)
+    (source_dir / "Default" / "Cache" / "data_1").write_bytes(b"x" * 100)
+    (source_dir / "Default" / "Cookies").write_bytes(b"logged in")
+    (source_dir / "SingletonLock").symlink_to("host-12345")
+
+    clone = await profile_manager.clone_profile(source.id, "copy")
+
+    clone_dir = Path(clone.get_storage_path(str(profile_manager.profiles_dir)))
+    assert (clone_dir / "Default" / "Cookies").read_bytes() == b"logged in"
+    assert not (clone_dir / "Default" / "Cache").exists()
+    assert not (clone_dir / "SingletonLock").is_symlink()

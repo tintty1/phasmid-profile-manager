@@ -377,9 +377,18 @@ class ProfileManager:
             try:
 
                 def copy_data():
-                    if any(path.is_symlink() for path in source_path.rglob("*")):
-                        raise ValueError("Cannot clone profile data containing symbolic links")
-                    shutil.copytree(source_path, profile_dir, dirs_exist_ok=True)
+                    # Caches and Chrome's run state stay behind: the locks a
+                    # crash leaves are symlinks naming the old process, and the
+                    # clone's first launch rebuilds every cache anyway.
+                    def disposable(directory: str, names: list[str]) -> set[str]:
+                        base = Path(directory).relative_to(source_path)
+                        return {n for n in names if profile_archive.is_disposable(base / n)}
+
+                    for path in source_path.rglob("*"):
+                        relative = path.relative_to(source_path)
+                        if path.is_symlink() and not profile_archive.is_disposable(relative):
+                            raise ValueError("Cannot clone profile data containing symbolic links")
+                    shutil.copytree(source_path, profile_dir, dirs_exist_ok=True, ignore=disposable)
 
                 await run_file_operation(copy_data)
                 logger.debug(f"Copied profile data from {source_path} to {profile_dir}")

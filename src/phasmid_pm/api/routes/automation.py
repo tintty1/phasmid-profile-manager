@@ -20,6 +20,7 @@ connection only disconnects, and the profile keeps running; close it with
 
 import asyncio
 import contextlib
+import json
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from loguru import logger
@@ -28,7 +29,7 @@ from websockets.exceptions import ConnectionClosed
 
 from phasmid_pm.api.dependencies import credentials_ok, get_profile_manager
 from phasmid_pm.api.routes.viewer import _api_key_from_protocols, _origin_allowed
-from phasmid_pm.core import auth
+from phasmid_pm.core import auth, download_watch
 
 router = APIRouter()
 
@@ -49,7 +50,8 @@ async def cdp_relay(websocket: WebSocket, profile_id: str) -> None:
         await websocket.close(code=4401, reason="Authentication required")
         return
 
-    session = get_profile_manager().browser_sessions.active_sessions.get(profile_id)
+    manager = get_profile_manager()
+    session = manager.browser_sessions.active_sessions.get(profile_id)
     endpoint = session.cdp_endpoint if session is not None else None
     if endpoint is None:
         await websocket.close(code=4404, reason="This profile has no browser to drive")
@@ -67,17 +69,33 @@ async def cdp_relay(websocket: WebSocket, profile_id: str) -> None:
 
     await websocket.accept()
 
+    # Downloads: a client's download folder is rewritten to the profile's own on
+    # the server, and finished downloads are named there (core/download_watch.py).
+    folder = manager.downloads_dir(profile_id)
+    registry = manager.download_registry
+    relays = manager.cdp_relays
+    relays[profile_id] = relays.get(profile_id, 0) + 1
+
     async def client_to_browser() -> None:
         while True:
             message = await websocket.receive()
             if message["type"] == "websocket.disconnect":
                 return
             text = message.get("text")
-            await upstream.send(text if text is not None else message.get("bytes") or b"")
+            if text is not None:
+                await upstream.send(download_watch.rewrite_client_message(text, folder) or text)
+            else:
+                await upstream.send(message.get("bytes") or b"")
 
     async def browser_to_client() -> None:
         async for message in upstream:
             if isinstance(message, str):
+                event = download_watch.download_event(message)
+                if event is not None:
+                    try:
+                        registry.observe(profile_id, folder, *event)
+                    except OSError as exc:  # never let bookkeeping break the session
+                        logger.warning(f"Could not file a download of {profile_id}: {exc}")
                 await websocket.send_text(message)
             else:
                 await websocket.send_bytes(message)
@@ -97,6 +115,21 @@ async def cdp_relay(websocket: WebSocket, profile_id: str) -> None:
                 asyncio.CancelledError, WebSocketDisconnect, ConnectionClosed, OSError, RuntimeError
             ):
                 await task
+        relays[profile_id] = relays.get(profile_id, 1) - 1
+        if relays[profile_id] <= 0:
+            relays.pop(profile_id, None)
+            # Nobody is watching downloads any more: hand them back to the
+            # profile's preference, where Chrome names files itself.
+            with contextlib.suppress(Exception):
+                await upstream.send(
+                    json.dumps(
+                        {
+                            "id": 2_000_000_000,
+                            "method": "Browser.setDownloadBehavior",
+                            "params": {"behavior": "default"},
+                        }
+                    )
+                )
         with contextlib.suppress(Exception):
             await upstream.close()
         with contextlib.suppress(Exception):

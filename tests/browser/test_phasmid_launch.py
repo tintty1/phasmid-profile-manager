@@ -155,7 +155,7 @@ async def test_downloads_land_in_the_profiles_folder(manager, attachment_site):
 
     async with async_playwright() as pw:
         browser = await pw.chromium.connect_over_cdp(session.cdp_endpoint)
-        # What the skill's helper does: undo Playwright's client-side download folder.
+        # A direct connection, past the relay: the client points downloads itself.
         cdp = await browser.new_browser_cdp_session()
         await cdp.send("Browser.setDownloadBehavior", downloads.cdp_download_behavior(folder))
         context = browser.contexts[0]

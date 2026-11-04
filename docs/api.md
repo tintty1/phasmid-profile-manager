@@ -432,32 +432,38 @@ Each profile downloads into `<data dir>/downloads/<profile id>/` on the server
 (`/data/downloads/...` in Docker, inside the volume), not into `~/Downloads`:
 
 ```http
-GET    /api/v1/profiles/{id}/downloads          {"profile_id", "downloads_dir", "files": [{"name", "size", "modified", "complete"}]}
+GET    /api/v1/profiles/{id}/downloads[?guid=]  {"profile_id", "downloads_dir", "files": [{"name", "size", "modified", "complete", "guid"}]}
 GET    /api/v1/profiles/{id}/downloads/{name}   the file, as an attachment
 DELETE /api/v1/profiles/{id}/downloads/{name}
 ```
 
-Files are listed newest first; `complete` is false while Chrome is still writing
-one (`.crdownload`). A name is the bare file name; anything that would leave the
+Files are listed newest first; `complete` is false while the browser is still
+writing one. `modified` carries a UTC offset. A name is the bare file name; anything that would leave the
 folder is a `404`. The folder works whether or not the browser runs, is not part
 of exports, backups or clones, and is deleted when the profile is purged.
 
 Downloads a person starts go there through the profile's
-`download.default_directory` preference, written before every launch. A CDP
-client changes that when it connects: Playwright's `connect_over_cdp` points
-downloads at a temporary folder **on the client's machine**, and with the
-browser in Docker or on another host its `download.save_as()` then writes an
-empty file. So send the profile's folder back right after connecting, and fetch
-files through the API:
+`download.default_directory` preference, written before every launch; Chrome
+names them, adding ` (1)` to a taken name.
 
-```python
-cdp = await browser.new_browser_cdp_session()
-await cdp.send("Browser.setDownloadBehavior", {
-    "behavior": "allow",                    # keep the site's file name
-    "downloadPath": launch["downloads_dir"], # from the launch response
-    "eventsEnabled": True,                  # so page.expect_download() still fires
-})
-```
+Downloads a CDP client starts are handled by the relay. A client chooses the
+download folder with `Browser.setDownloadBehavior`; Playwright's
+`connect_over_cdp` sends one on connect, naming a temporary folder **on the
+client's machine**, which does not exist when the browser is in Docker or on
+another host (its `download.save_as()` then writes an empty file). The relay
+rewrites that call: downloads go to `<downloads>/.incoming/` named by GUID,
+with events on, and when the browser reports one complete the relay moves it
+into the folder under its own name, never overwriting (`export (1).csv`). So
+fetch files through the API, not `save_as()`:
+
+- `GET /profiles/{id}/downloads?guid=<guid>` finds one download by the
+  browser's GUID, which Playwright shows as the file name of
+  `download.path()`; names can repeat, GUIDs cannot. A download still running
+  is listed with `complete: false`.
+- `behavior: deny` and `default` pass through unchanged. When the last client
+  disconnects, the relay sets `default` again, so the preference applies.
+- A client connecting to Chrome's own loopback port instead of the relay gets
+  none of this.
 
 Launching a profile that another instance has open returns **`409`**. Retry once
 the holder closes the browser, or wait out `PPM_LEASE_TTL` if that instance is

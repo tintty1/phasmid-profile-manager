@@ -12,6 +12,7 @@ import {
   Download,
   Ellipsis,
   EyeOff,
+  FileDown,
   Globe,
   Lock,
   LockOpen,
@@ -30,6 +31,7 @@ import {
 
 import { BrowserSetup } from '@/components/browser-setup'
 import { BrowserViewer } from '@/components/browser-viewer'
+import { DownloadsDialog } from '@/components/downloads-dialog'
 import { EmptyState } from '@/components/empty-state'
 import { ConfirmDialog, Modal } from '@/components/modal'
 import { ProfileForm } from '@/components/profile-form'
@@ -77,6 +79,8 @@ export default function ProfilesPage() {
   // Running profiles the server shows on a VNC display, and the one being viewed.
   const [viewable, setViewable] = useState<Set<string>>(new Set())
   const [viewing, setViewing] = useState<Profile | null>(null)
+  // Whose downloads are shown, if anyone's.
+  const [downloadsFor, setDownloadsFor] = useState<Profile | null>(null)
   // What each running browser is (mode, CDP), and what this server can launch.
   const [active, setActive] = useState<Map<string, ActiveBrowser>>(new Map())
   const [modes, setModes] = useState<BrowserModes | null>(null)
@@ -1032,6 +1036,14 @@ export default function ProfilesPage() {
                               />
                             )}
                             <MenuItem
+                              icon={<FileDown size={13} />}
+                              label="Downloads…"
+                              onClick={() => {
+                                setDownloadsFor(profile)
+                                closeMenu(profile.id)
+                              }}
+                            />
+                            <MenuItem
                               icon={<PackageOpen size={13} />}
                               label="Export…"
                               onClick={() => {
@@ -1124,6 +1136,15 @@ export default function ProfilesPage() {
           profileName={viewing.name}
           onClose={() => setViewing(null)}
           onStop={() => stop(viewing)}
+        />
+      )}
+
+      {downloadsFor && (
+        <DownloadsDialog
+          profileId={downloadsFor.id}
+          profileName={downloadsFor.name}
+          running={active.has(downloadsFor.id)}
+          onClose={() => setDownloadsFor(null)}
         />
       )}
 

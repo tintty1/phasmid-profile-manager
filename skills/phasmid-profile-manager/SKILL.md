@@ -214,38 +214,33 @@ python scripts/ppm.py fetch shop-de-01 report.csv -o ./report.csv
 python scripts/ppm.py rm-download shop-de-01 report.csv
 ```
 
-In Python, `open_profile` already routes downloads to that folder. Trigger the
-download, wait for it, then fetch it through the API:
+Downloads an agent starts land there too: the manager's CDP relay sends them
+to the profile's folder whatever folder your client asks for. Trigger the
+download, then save it through the API with `save_download`:
 
 ```python
-from ppm import open_profile, wait_for_download, fetch_download
+from ppm import open_profile, save_download
 
 async with open_profile("shop-de-01") as (page, context, info):
     await page.goto("https://example.com/reports")
     async with page.expect_download() as pending:
         await page.click("text=Export CSV")
-    name = (await pending.value).suggested_filename
-    await wait_for_download("shop-de-01", name)  # until it is complete
-    fetch_download("shop-de-01", name, "./report.csv")
+    path = await save_download("shop-de-01", await pending.value, "./report.csv")
 ```
 
-- **Never trust `download.save_as()` / `download.path()` here.** Over
-  `connect_over_cdp` they read a path on the agent's machine; with the browser
-  in Docker or elsewhere, `save_as()` writes an *empty* file and reports
-  success. Always fetch through the API.
-- Connecting with Playwright yourself (not through `open_profile`)? Send this
-  right after `connect_over_cdp`, or Playwright sends downloads to a temporary
-  folder on your machine:
-  ```python
-  cdp = await browser.new_browser_cdp_session()
-  await cdp.send(
-      "Browser.setDownloadBehavior",
-      {"behavior": "allow", "downloadPath": launch["downloads_dir"], "eventsEnabled": True},
-  )
-  ```
-- The file keeps the site's name; a second file of the same name becomes
-  `name (1).ext`. Take the name from `suggested_filename` or the newest entry.
-  `complete: false` (a `.crdownload` file) means Chrome is still writing it.
+- **Never use `download.save_as()` / `download.path()` to read the file.** Over
+  `connect_over_cdp` they point at your machine, while the file is on the
+  server; with the browser in Docker or elsewhere, `save_as()` writes an
+  *empty* file and reports success. `save_download` waits for the download to
+  finish and fetches the exact file.
+- Plain Playwright (without the helper) works the same way, as long as you
+  connect to the `cdp_endpoint` from the launch response: no extra call needed.
+  Fetch the file afterwards with `GET /profiles/{id}/downloads?guid=<guid>` (the
+  GUID is the file name of `await download.path()`), then
+  `GET /profiles/{id}/downloads/<name>`.
+- Names are kept, and never overwritten: a second `export.csv` becomes
+  `export (1).csv`. That is why `save_download` finds files by GUID, not name.
+  `complete: false` means it is still downloading.
 - Downloads are not in exports, backups or clones. Destroying (purging) the
   profile deletes them.
 

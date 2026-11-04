@@ -13,6 +13,7 @@ from phasmid_pm.config import get_settings
 from . import browser_install, downloads, machine, profile_archive, proxy_check
 from .browser_session import BrowserLaunchError, BrowserSessionManager, reap_orphan
 from .database import StaleWriteError, StorageManager
+from .download_watch import DownloadRegistry
 from .launch import build_plan
 from .leases import ProfileLocked, holder_alive, make_lease_holder
 from .models import (
@@ -43,6 +44,11 @@ class ProfileManager:
         self.profiles_dir = self.data_dir / "profiles"
         # Per-session files (the profile JSON a browser reads, proxy arguments).
         self.run_dir = self.data_dir / "run"
+        # Downloads CDP clients start, watched by the relay (core/download_watch.py).
+        self.download_registry = DownloadRegistry()
+        # Profile id -> CDP relays attached now, so the last one to leave can
+        # hand downloads back to the profile's preference.
+        self.cdp_relays: dict[str, int] = {}
 
         # Active browser sessions are owned by a dedicated manager, which also
         # renews this process's leases for as long as its browsers are open.
@@ -320,6 +326,7 @@ class ProfileManager:
             folder = self.downloads_dir(profile_id)
             if folder.exists():
                 await run_file_operation(shutil.rmtree, folder)
+            self.download_registry.forget(profile_id)
             return await self.storage.delete_profile(profile_id)
 
     async def list_profiles(

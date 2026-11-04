@@ -7,10 +7,9 @@ is pointed at it in two ways:
 
 - the ``download.default_directory`` preference, written into the profile's
   ``Default/Preferences`` before every launch, for downloads a person starts;
-- ``Browser.setDownloadBehavior`` over CDP, which an automation client sends
-  after it connects (Playwright sends its own, pointing at a temporary folder
-  on the *client's* machine, which is why the skill's helper sends this one
-  after it). See :func:`cdp_download_behavior`.
+- for downloads an automation client starts, the CDP relay rewrites the
+  client's ``Browser.setDownloadBehavior`` to this folder and files each
+  finished download under its own name (``core/download_watch.py``).
 
 The folder is not part of the browser data directory, so exports, backups and
 clones do not carry downloaded files; permanently deleting the profile removes
@@ -21,7 +20,7 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -85,7 +84,10 @@ def list_files(folder: Path) -> list[dict[str, Any]]:
             {
                 "name": path.name,
                 "size": stat.st_size,
-                "modified": datetime.fromtimestamp(stat.st_mtime),
+                # Aware, in UTC: the reader may sit in another zone (a browser
+                # in front of a container on UTC), and a naive time is read as
+                # its own local time.
+                "modified": datetime.fromtimestamp(stat.st_mtime, tz=UTC),
                 "complete": not partial,
             }
         )

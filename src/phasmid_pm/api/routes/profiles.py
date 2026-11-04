@@ -5,7 +5,9 @@ API routes for managing profiles.
 import re
 import shutil
 import tempfile
+import time
 import zipfile
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -39,7 +41,7 @@ from phasmid_pm.api.models.profiles import (
     ReconcileOsRequest,
 )
 from phasmid_pm.api.models.system import ApiResponse, ExcelImportData
-from phasmid_pm.core import downloads, proxy_check
+from phasmid_pm.core import download_watch, downloads, proxy_check
 from phasmid_pm.core.browser_session import available_modes
 from phasmid_pm.core.database import StaleWriteError
 from phasmid_pm.core.excel_manager import ExcelManager
@@ -499,16 +501,40 @@ async def get_profile_stats(profile_id: str):
         "being written has complete=false. Works whether or not the browser runs."
     ),
 )
-async def list_profile_downloads(profile_id: str):
+async def list_profile_downloads(
+    profile_id: str,
+    guid: str | None = Query(
+        None, description="Only the download with this GUID (Playwright: download.path()'s name)"
+    ),
+):
     manager = get_profile_manager()
     if not await manager.get_profile(profile_id):
         raise HTTPException(status_code=404, detail=f"Profile with ID {profile_id} not found")
     folder = manager.downloads_dir(profile_id)
-    return DownloadListResponse(
-        profile_id=profile_id,
-        downloads_dir=str(folder),
-        files=[DownloadInfo(**entry) for entry in downloads.list_files(folder)],
-    )
+    registry = manager.download_registry
+    registry.sweep(profile_id, folder)
+    known = registry.by_name(profile_id)
+    files = [
+        DownloadInfo(**entry, guid=known[entry["name"]].guid if entry["name"] in known else None)
+        for entry in downloads.list_files(folder)
+    ]
+    incoming = download_watch.incoming_dir(folder)
+    for pending in registry.in_progress(profile_id):
+        partial = incoming / pending.guid
+        stat = partial.stat() if partial.is_file() else None
+        files.insert(
+            0,
+            DownloadInfo(
+                name=pending.suggested,
+                size=stat.st_size if stat else 0,
+                modified=datetime.fromtimestamp(stat.st_mtime if stat else time.time(), tz=UTC),
+                complete=False,
+                guid=pending.guid,
+            ),
+        )
+    if guid is not None:
+        files = [entry for entry in files if entry.guid == guid]
+    return DownloadListResponse(profile_id=profile_id, downloads_dir=str(folder), files=files)
 
 
 @router.get(

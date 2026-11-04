@@ -32,7 +32,7 @@ Shell (stdlib only, prints JSON):
   ppm.py rm-download ID_OR_NAME FILE
 
 Python (needs playwright; any recent version speaks CDP):
-  from ppm import open_profile, fetch_download
+  from ppm import open_profile, save_download
   async with open_profile("shop-de-01", mode="headless") as (page, context, info):
       await page.goto("https://example.com")
 """
@@ -159,18 +159,31 @@ def fetch_download(id_or_name: str, name: str, dest: str | None = None) -> str:
     return path
 
 
-async def wait_for_download(id_or_name: str, name: str, timeout: float = 120.0) -> dict[str, Any]:
-    """Wait until the named file is in the profile's downloads and complete."""
-    import asyncio
+async def save_download(
+    id_or_name: str, download: Any, dest: str | None = None, timeout: float = 120.0
+) -> str:
+    """Save a Playwright Download from a profile to ``dest`` here; returns the path.
 
+    Use this instead of download.save_as(): over connect_over_cdp, save_as()
+    reads a path on this machine and, with the browser elsewhere, writes an
+    empty file. Through the manager's relay the file lands in the profile's
+    downloads on the server instead, and this finds it by the download's GUID
+    (the file name of download.path()), so a repeated file name is never
+    confused with an older one. ``dest`` defaults to ./<its name>.
+    """
+    import asyncio
+    from pathlib import PurePath
+
+    guid = PurePath(await download.path()).name  # waits until the browser has finished
+    profile = resolve(id_or_name)
     loop = asyncio.get_running_loop()
     deadline = loop.time() + timeout
     while loop.time() < deadline:
-        for entry in list_downloads(id_or_name):
-            if entry["name"] == name and entry["complete"]:
-                return entry
-        await asyncio.sleep(0.5)
-    raise PpmError(408, "timeout", f"{name!r} did not finish downloading in {timeout:.0f}s")
+        found = request("GET", f"/profiles/{profile['id']}/downloads", guid=guid)["files"]
+        if found and found[0]["complete"]:
+            return fetch_download(profile["id"], found[0]["name"], dest)
+        await asyncio.sleep(0.25)
+    raise PpmError(408, "timeout", f"download {guid} did not reach the server in {timeout:.0f}s")
 
 
 def parse_proxy(url: str) -> dict[str, Any]:
@@ -200,7 +213,7 @@ async def open_profile(id_or_name: str, mode: str | None = None, stop_on_exit: b
     """Launch a profile and yield (page, context, launch_info) driven over CDP.
 
     Headless unless ``mode`` says otherwise. Downloads go to the profile's own
-    folder on the server; get them with fetch_download().
+    folder on the server; get them with save_download().
 
     The context is the profile's own persistent one - its cookies, storage and
     machine. Leaving the block disconnects; the browser keeps running unless
@@ -217,19 +230,8 @@ async def open_profile(id_or_name: str, mode: str | None = None, stop_on_exit: b
         async with async_playwright() as p:
             browser = await p.chromium.connect_over_cdp(endpoint, headers=headers)
             try:
-                # Playwright points downloads at a temporary folder on *this*
-                # machine; send them back to the profile's own folder on the
-                # server, where fetch_download() can reach them from anywhere.
-                if info.get("downloads_dir"):
-                    cdp = await browser.new_browser_cdp_session()
-                    await cdp.send(
-                        "Browser.setDownloadBehavior",
-                        {
-                            "behavior": "allow",
-                            "downloadPath": info["downloads_dir"],
-                            "eventsEnabled": True,
-                        },
-                    )
+                # Downloads need nothing here: the relay sends them to the
+                # profile's folder on the server; get them with save_download().
                 context = browser.contexts[0]
                 page = context.pages[0] if context.pages else await context.new_page()
                 yield page, context, info

@@ -22,7 +22,7 @@ POST   /profiles                      create; only "name" is required
 PUT    /profiles/{id}                 update; browser_settings is merged
 DELETE /profiles/{id}                 move to Trash (409 if running)
 POST   /profiles/{id}/clone           {"new_name": "...", "regenerate_fingerprint": true, "copy_data": true}
-GET    /profiles/{id}/downloads       {"downloads_dir", "files": [{"name", "size", "modified", "complete"}]}
+GET    /profiles/{id}/downloads[?guid=]   {"downloads_dir", "files": [{"name", "size", "modified", "complete", "guid"}]}
 GET    /profiles/{id}/downloads/{name}      the file's bytes
 DELETE /profiles/{id}/downloads/{name}
 POST   /profiles/{id}/reset-fingerprint     new seed, new hardware
@@ -103,10 +103,11 @@ Launch response:
 }
 ```
 
-- `downloads_dir` is on the server. After connecting, send
-  `Browser.setDownloadBehavior {"behavior": "allow", "downloadPath": downloads_dir,
-  "eventsEnabled": true}` over a browser CDP session, then fetch files from
-  `/profiles/{id}/downloads`; `download.save_as()` is not reliable remotely.
+- `downloads_dir` is on the server. Downloads a client starts through the relay
+  land there under their own names (`name (1).ext` for repeats); find one with
+  `?guid=` (Playwright: the file name of `download.path()`) and fetch it from
+  `/profiles/{id}/downloads/<name>`. `download.save_as()` is not reliable
+  remotely.
 
 - `status` is `already_running` when it was up already; the endpoint is the same.
 - Connect with `chromium.connect_over_cdp(cdp_endpoint, headers={"x-api-key": key})`

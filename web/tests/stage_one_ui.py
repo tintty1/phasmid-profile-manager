@@ -9,6 +9,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Thread
 import json
+from urllib.parse import unquote
 import unittest
 
 from playwright.sync_api import sync_playwright, expect
@@ -49,6 +50,7 @@ class DesktopUI(unittest.TestCase):
         self.trash = []
         self.config = {"version": "0.5.0", "host": "127.0.0.1", "port": 8000, "database_path": "/local/profiles.db", "api_key_set": False, "user_auth_enabled": False, "encryption_enabled": True, "cors_origins": [], "browser_available": True, "browser_version": "146.0.1", "uptime_seconds": 60}
         self.active = []
+        self.downloads = []
         self.gpus = [
             {"os": "linux", "gpu": "0x10de:0x2504", "renderer": "ANGLE (NVIDIA Corporation, NVIDIA GeForce RTX 3060/PCIe/SSE2, OpenGL ES 3.2)", "weight": 3},
             {"os": "linux", "gpu": "0x8086:0x3185", "renderer": "ANGLE (Intel, Mesa Intel(R) UHD Graphics 600 (GLK 2), OpenGL ES 3.2)", "weight": 1},
@@ -79,6 +81,17 @@ class DesktopUI(unittest.TestCase):
             current = next(p for p in self.profiles if p["id"] == profile_id)
             body = request.post_data_json
             data = {**current, **{k: v for k, v in body.items() if k != "browser_settings"}, "browser_settings": {**current["browser_settings"], **body["browser_settings"]}, "row_version": current["row_version"] + 1}
+        elif path.startswith("/profiles/") and "/downloads" in path:
+            profile_id, _, rest = path.removeprefix("/profiles/").partition("/downloads")
+            name = unquote(rest.lstrip("/"))
+            if not name:
+                data = {"profile_id": profile_id, "downloads_dir": f"/data/downloads/{profile_id}", "files": self.downloads}
+            elif request.method == "DELETE":
+                self.downloads = [f for f in self.downloads if f["name"] != name]
+                data, envelope = None, True
+            else:
+                route.fulfill(status=200, content_type="application/octet-stream", body=f"bytes of {name}".encode(), headers={"Content-Disposition": f'attachment; filename="{name}"'})
+                return
         elif path.startswith("/profiles/") and path.endswith("/machine"):
             data = {"id": "pinned-machine", "os": {"family": "linux", "version": "Ubuntu 24.04"}}
         elif path == "/groups":
@@ -184,6 +197,41 @@ class DesktopUI(unittest.TestCase):
         saved = next(json.loads(body) for method, path, body in self.calls if method == "PUT" and path == "/profiles/pinned")
         self.assertEqual(saved["browser_settings"], {"os": "linux", "gpu": "0x10de:0x2504", "languages": None, "timezone": None, "webrtc_policy": "default"})
         self.assertEqual(saved["row_version"], 3)
+
+    def test_downloads_are_listed_saved_and_deleted(self):
+        self.browser_state = {**self.browser_state, "installed": True, "state": "ready", "version": "146.0.1"}
+        self.profiles = [{"id": "dl", "name": "Downloader", "status": "active", "browser_settings": {"os": "linux", "gpu": None, "languages": None, "timezone": None, "webrtc_policy": "default"}, "fingerprint": None, "created_at": "2026-01-01T00:00:00Z", "row_version": 1}]
+        self.downloads = [
+            {"name": "report (1).csv", "size": 1536, "modified": "2026-11-04T14:46:04+00:00", "complete": True},
+            {"name": "big.zip.crdownload", "size": 3_500_000, "modified": "2026-11-04T14:47:00+00:00", "complete": False},
+        ]
+        self.page.goto(self.origin)
+
+        self.page.get_by_role("button", name="Actions for Downloader", exact=True).click()
+        self.page.get_by_role("menuitem", name="Downloads…").click()
+        dialog = self.page.get_by_role("dialog", name="Downloads — Downloader")
+        expect(dialog).to_contain_text("report (1).csv")
+        expect(dialog).to_contain_text("1.5 KB")
+        expect(dialog).to_contain_text("3.3 MB")
+        expect(dialog).to_contain_text("Still downloading")
+        expect(dialog).to_contain_text("/data/downloads/dl")
+        expect(dialog.get_by_role("button", name="Save big.zip.crdownload")).to_be_disabled()
+
+        with self.page.expect_download() as saved:
+            dialog.get_by_role("button", name="Save report (1).csv").click()
+        self.assertEqual(saved.value.suggested_filename, "report (1).csv")
+        self.assertEqual(Path(saved.value.path()).read_bytes(), b"bytes of report (1).csv")
+
+        dialog.get_by_role("button", name="Delete report (1).csv").click()
+        dialog.get_by_role("button", name="Confirm deleting report (1).csv").click()
+        expect(dialog).not_to_contain_text("report (1).csv")
+        self.assertIn(("DELETE", "/profiles/dl/downloads/report%20(1).csv", None), self.calls)
+
+        self.downloads = []
+        dialog.get_by_role("button", name="Refresh downloads").click()
+        expect(dialog).to_contain_text("Nothing downloaded yet")
+        self.page.keyboard.press("Escape")
+        expect(dialog).not_to_be_visible()
 
     def test_schedule_offers_only_launch(self):
         self.page.route("**/api/v1/schedules", lambda route: route.fulfill(status=200, content_type="application/json", body=json.dumps({"schedules": [], "total": 0})))

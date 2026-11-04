@@ -199,6 +199,37 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return response.json() as Promise<T>
 }
 
+/** One file a profile's browser downloaded, in its folder on the server. */
+export interface DownloadFile {
+  name: string
+  size: number
+  /** ISO time, with an offset. */
+  modified: string
+  /** False while Chrome is still writing it (a .crdownload file). */
+  complete: boolean
+}
+
+export interface DownloadList {
+  profile_id: string
+  /** The folder on the server; shown, never opened from here. */
+  downloads_dir: string
+  /** Newest first. */
+  files: DownloadFile[]
+}
+
+/** 1536 -> "1.5 KB". Downloads run from bytes to gigabytes, so it scales. */
+export function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  const units = ['KB', 'MB', 'GB', 'TB']
+  let value = bytes / 1024
+  let unit = 0
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024
+    unit += 1
+  }
+  return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[unit]}`
+}
+
 function toQuery(params: Record<string, unknown>): string {
   const query = new URLSearchParams()
   for (const [key, value] of Object.entries(params)) {
@@ -329,6 +360,28 @@ export const profilesAPI = {
     })
     if (!response.ok) throw new Error(response.statusText)
     return response.blob()
+  },
+
+  listDownloads(id: string): Promise<DownloadList> {
+    return request<DownloadList>(`${API_PREFIX}/profiles/${id}/downloads`)
+  },
+
+  async fetchDownload(id: string, name: string): Promise<Blob> {
+    const response = await fetch(
+      `${API_BASE_URL}${API_PREFIX}/profiles/${id}/downloads/${encodeURIComponent(name)}`,
+      { headers: authHeaders() },
+    )
+    if (!response.ok) {
+      const body = await response.json().catch(() => null)
+      throw new Error(body?.error?.message ?? body?.detail ?? response.statusText)
+    }
+    return response.blob()
+  },
+
+  deleteDownload(id: string, name: string): Promise<unknown> {
+    return request(`${API_PREFIX}/profiles/${id}/downloads/${encodeURIComponent(name)}`, {
+      method: 'DELETE',
+    })
   },
 
   async exportArchive(id: string): Promise<Blob> {

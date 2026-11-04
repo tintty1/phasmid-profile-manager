@@ -261,10 +261,9 @@ class ProfileLaunchResponse(BaseModel):
     downloads_dir: str | None = Field(
         None,
         description=(
-            "Where the browser saves downloads, on the server. A CDP client should send "
-            "Browser.setDownloadBehavior {behavior: allow, downloadPath: downloads_dir} "
-            "after connecting (Playwright points downloads at its own machine otherwise), "
-            "then fetch files from GET /profiles/{id}/downloads."
+            "Where the browser saves downloads, on the server. Downloads a client starts "
+            "through cdp_endpoint land there too (the relay redirects them); fetch them "
+            "from GET /profiles/{id}/downloads, not with Playwright's download.save_as()."
         ),
     )
     launch: dict[str, Any] = Field(
@@ -436,7 +435,14 @@ class DownloadInfo(BaseModel):
     name: str
     size: int = Field(..., description="Bytes on disk so far")
     modified: datetime
-    complete: bool = Field(..., description="False while Chrome is still writing it (.crdownload)")
+    complete: bool = Field(..., description="False while the browser is still writing it")
+    guid: str | None = Field(
+        None,
+        description=(
+            "The browser's id of this download, when a CDP client started it through "
+            "the relay. Playwright: the file name of download.path()."
+        ),
+    )
 
 
 class DownloadListResponse(BaseModel):

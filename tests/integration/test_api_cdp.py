@@ -5,6 +5,7 @@ browser is launched.
 """
 
 import asyncio
+import json
 import threading
 from types import SimpleNamespace
 
@@ -14,6 +15,7 @@ from starlette.websockets import WebSocketDisconnect
 from websockets.asyncio.server import serve
 
 from phasmid_pm.api.routes import automation
+from phasmid_pm.core.download_watch import DownloadRegistry
 from phasmid_pm.main import app
 
 URL = "/api/v1/profiles/p1/cdp"
@@ -46,7 +48,7 @@ def echo_endpoint():
 
 
 @pytest.fixture
-def relay(monkeypatch, echo_endpoint):
+def relay(monkeypatch, echo_endpoint, tmp_path):
     """The relay with auth and the session registry replaced by stand-ins."""
     state = {
         "authorized": True,
@@ -56,7 +58,14 @@ def relay(monkeypatch, echo_endpoint):
     async def credentials_ok(_token, _key):
         return state["authorized"]
 
-    manager = SimpleNamespace(browser_sessions=SimpleNamespace(active_sessions=state["sessions"]))
+    state["downloads"] = tmp_path / "downloads" / "p1"
+    manager = SimpleNamespace(
+        browser_sessions=SimpleNamespace(active_sessions=state["sessions"]),
+        downloads_dir=lambda _profile_id: state["downloads"],
+        download_registry=DownloadRegistry(),
+        cdp_relays={},
+    )
+    state["manager"] = manager
     monkeypatch.setattr(automation, "credentials_ok", credentials_ok)
     monkeypatch.setattr(automation, "get_profile_manager", lambda: manager)
     return state
@@ -112,3 +121,62 @@ def test_browser_that_could_not_be_served(relay):
     with pytest.raises(WebSocketDisconnect) as exc, TestClient(app).websocket_connect(URL):
         pass
     assert exc.value.code == 4404
+
+
+def test_a_clients_download_folder_is_replaced_by_the_profiles(relay):
+    """Playwright asks for a folder on its own machine; the browser gets the server's."""
+    asked = {
+        "id": 7,
+        "method": "Browser.setDownloadBehavior",
+        "params": {"behavior": "allowAndName", "downloadPath": "/tmp/playwright-artifacts-x"},
+    }
+    with TestClient(app).websocket_connect(URL) as ws:
+        ws.send_text(json.dumps(asked))
+        sent_on = json.loads(ws.receive_text())  # the echo: what the browser received
+    assert sent_on["id"] == 7
+    assert sent_on["params"] == {
+        "behavior": "allowAndName",
+        "downloadPath": str(relay["downloads"] / ".incoming"),
+        "eventsEnabled": True,
+    }
+
+
+def test_deny_is_passed_through_untouched(relay):
+    asked = {"id": 1, "method": "Browser.setDownloadBehavior", "params": {"behavior": "deny"}}
+    with TestClient(app).websocket_connect(URL) as ws:
+        ws.send_text(json.dumps(asked))
+        assert json.loads(ws.receive_text()) == asked
+
+
+def test_a_finished_download_is_filed_under_its_own_name(relay):
+    folder = relay["downloads"]
+    (folder / ".incoming").mkdir(parents=True)
+    (folder / "orders.csv").write_text("older")
+    (folder / ".incoming" / "guid-1").write_text("newer")
+    begin = {
+        "method": "Browser.downloadWillBegin",
+        "params": {"guid": "guid-1", "suggestedFilename": "orders.csv", "url": "https://x/o"},
+    }
+    done = {
+        "method": "Browser.downloadProgress",
+        "params": {"guid": "guid-1", "state": "completed"},
+    }
+    with TestClient(app).websocket_connect(URL) as ws:
+        # The echo sends each back as if the browser had: the relay sees them
+        # on the way to the client, exactly where real events pass.
+        ws.send_text(json.dumps(begin))
+        assert json.loads(ws.receive_text()) == begin
+        ws.send_text(json.dumps(done))
+        assert json.loads(ws.receive_text()) == done
+
+    assert (folder / "orders.csv").read_text() == "older", "never overwritten"
+    assert (folder / "orders (1).csv").read_text() == "newer"
+    named = relay["manager"].download_registry.by_name("p1")
+    assert named["orders (1).csv"].guid == "guid-1"
+
+
+def test_the_last_client_to_leave_hands_downloads_back(relay):
+    with TestClient(app).websocket_connect(URL) as ws:
+        ws.send_text("{}")
+        ws.receive_text()
+    assert relay["manager"].cdp_relays == {}

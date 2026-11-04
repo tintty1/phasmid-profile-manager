@@ -16,7 +16,8 @@ services:
       # Headed launches default to a desktop window instead of a VNC display.
       PPM_VNC: "0"
       WAYLAND_DISPLAY: ${WAYLAND_DISPLAY:-wayland-1}
-      XDG_RUNTIME_DIR: /run/user/0
+      XDG_RUNTIME_DIR: /run/user/1000
     volumes:
-      # Only the compositor socket, not the whole runtime directory.
-      - ${XDG_RUNTIME_DIR:-/run/user/1000}/${WAYLAND_DISPLAY:-wayland-1}:/run/user/0/${WAYLAND_DISPLAY:-wayland-1}
+      # Only the compositor socket, not the whole runtime directory. The app
+      # runs as uid 1000, the usual owner of a desktop session's socket.
+      - ${XDG_RUNTIME_DIR:-/run/user/1000}/${WAYLAND_DISPLAY:-wayland-1}:/run/user/1000/${WAYLAND_DISPLAY:-wayland-1}

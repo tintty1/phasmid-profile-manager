@@ -6,7 +6,7 @@
 #
 # The port is published to loopback (127.0.0.1) only, because the app is open by
 # default. Before exposing it beyond this host, create a user account
-# (`docker compose exec app uv run phasmid-pm user add <name>`) or set
+# (`docker compose exec app /app/.venv/bin/phasmid-pm user add <name>`) or set
 # PPM_API_KEY, and set PPM_SECRET_KEY to encrypt proxy passwords at rest.
 services:
   app:
@@ -18,12 +18,15 @@ services:
     # keeps its Secure flag even though this process sees plain HTTP.
     # PPM_SECURE_COOKIES: "1"
     volumes:
+      # The database, the profiles, and the installed Phasmid release, so a
+      # rebuild neither loses accounts nor downloads the browser again.
       - ppm-data:/data
-      # The downloaded Camoufox browser, kept so a rebuild doesn't re-download it.
-      - camoufox-cache:/root/.cache/camoufox
     ports:
       - "127.0.0.1:8000:8000"
-    # Firefox content processes need more shared memory than the 64 MB default.
+    # Chrome's sandbox needs user namespaces, which the default profile blocks.
+    security_opt:
+      - seccomp:unconfined
+    # Chrome renderers need more shared memory than the 64 MB default.
     shm_size: "2gb"
     # Reap exited Xvnc and browser children, which the app does not wait on.
     init: true
@@ -31,4 +34,3 @@ services:
 
 volumes:
   ppm-data:
-  camoufox-cache:

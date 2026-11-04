@@ -15,10 +15,12 @@ from phasmid_pm.core.database import StorageManager
 from phasmid_pm.core.models import ProxyConfig, ProxyType
 from phasmid_pm.core.profile_manager import ProfileManager
 
+# Location follows each profile's exit address at launch; these differ in the
+# machine (OS) and in a stated language list.
 DEMO_PROFILES = [
-    {"name": "US shopper", "region": "us"},
-    {"name": "UK researcher", "region": "uk"},
-    {"name": "DE tester", "region": "germany"},
+    {"name": "US shopper", "browser_settings": {"os": "windows"}},
+    {"name": "UK researcher", "browser_settings": {"os": "linux", "languages": ["en-GB", "en"]}},
+    {"name": "DE tester", "browser_settings": {"os": "linux", "languages": ["de-DE", "de", "en"]}},
 ]
 
 
@@ -34,7 +36,7 @@ async def main() -> None:
         profile = await manager.create_profile(
             name=entry["name"],
             group=group["id"],
-            browser_settings={"region": entry["region"]},
+            browser_settings=entry["browser_settings"],
         )
         print(f"Created profile {profile.name} ({profile.id})")
 

@@ -3,6 +3,6 @@ contact_links:
   - name: Questions & discussions
     url: https://github.com/tintty1/phasmid-profile-manager/discussions
     about: Ask questions and share ideas in GitHub Discussions.
-  - name: Camoufox browser
-    url: https://github.com/daijro/camoufox
-    about: Issues with the Camoufox browser itself belong upstream.
+  - name: Phasmid browser
+    url: https://github.com/tintty1/phasmid
+    about: Issues with what the browser itself reports belong to Phasmid.

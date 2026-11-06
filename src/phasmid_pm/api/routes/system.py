@@ -175,10 +175,8 @@ async def restart_system():
     operation_id="list_gpus",
     summary="List the GPUs a machine may claim.",
     description=(
-        "GPUs captured on a real host, and those the captured host class backs with "
-        "the same WebGL surface (Phasmid's genprofile claims). Pass one as "
-        "browser_settings.gpu to generate a machine with it. Empty until the browser "
-        "is installed."
+        "The GPUs of the real devices phasmid-profile-gen has captures of. Pass one "
+        "as browser_settings.gpu to generate a machine with it."
     ),
 )
 async def list_gpus(os: str | None = None):

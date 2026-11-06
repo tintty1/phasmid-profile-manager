@@ -8,7 +8,7 @@ unless the profile states a timezone of its own. A profile that reports
 page can measure with two lines of JavaScript.
 
 This module resolves where a proxy really comes out, with the same database
-and rules Phasmid's genprofile uses to place a generated profile (DB-IP City
+and rules phasmid-profile-gen uses to place a generated profile (DB-IP City
 Lite, timezonefinder, CLDR), and compares that with what the profile states.
 """
 
@@ -179,7 +179,7 @@ _LOCATE_SEED = "0" * 32
 
 
 def locate(ip: str) -> ProxyLocation:
-    """Place an address the way genprofile places a profile's exit. Blocking.
+    """Place an address the way phasmid-profile-gen places a profile's exit. Blocking.
 
     Raises LocationUnavailable when the generator or its database is missing or
     does not know the address, so the caller can still report a working proxy
@@ -370,7 +370,7 @@ async def check(
         return ProxyCheckResult(reachable=False, error=str(exc), findings=findings)
 
     try:
-        # genprofile runs in a child process and reads a 127 MB database, so keep
+        # phasmid-profile-gen runs in a child process and reads a 127 MB database, so keep
         # it off the event loop.
         location = await asyncio.to_thread(locate, ip)
     except LocationUnavailable as exc:

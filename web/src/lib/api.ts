@@ -668,7 +668,7 @@ export interface GpuChoice {
 }
 
 export const fingerprintsAPI = {
-  /** Empty until the browser is installed. */
+  /** The GPUs a generated machine may claim, those of the captured devices. */
   async gpus(os?: string): Promise<GpuChoice[]> {
     const body = await request<{ data: { gpus: GpuChoice[]; total: number } }>(
       `${API_PREFIX}/fingerprints/gpus${toQuery({ os })}`,

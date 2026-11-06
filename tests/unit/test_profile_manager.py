@@ -250,10 +250,11 @@ async def test_a_new_exit_moves_the_machine_and_keeps_its_hardware(profile_manag
     assert tokyo["network"]["webrtc"]["public_ip"] == "203.0.113.20"
     for section in ("seed", "os", "hardware", "display", "gpu", "fonts"):
         assert tokyo[section] == berlin[section], f"{section} must not change with the exit"
-    # The move regenerates from the pin's own seed, OS and GPU.
+    # The move regenerates from the pin's own seed and OS. It asks for no GPU:
+    # only the location is kept, and the pin's GPU may have no capture any more.
     request = phasmid.genprofile.generated()[-1]
     assert (request["seed"], request["os"]) == (berlin["seed"], berlin["os"]["family"])
-    assert request["gpu"] == f"{berlin['gpu']['vendor_id']}:{berlin['gpu']['device_id']}"
+    assert "gpu" not in request
 
 
 @pytest.mark.asyncio

@@ -151,7 +151,7 @@ export function ProfileForm({ open, profile, groups, onClose, onSaved }: Props) 
   // answer that once the user has started typing in them.
   const [storedGeography, setStoredGeography] = useState(false)
   const [clearingGeography, setClearingGeography] = useState(false)
-  // GPUs a captured host backs, per OS; empty until the browser is installed.
+  // GPUs of phasmid-profile-gen's captured devices, per OS.
   const [gpus, setGpus] = useState<Record<string, GpuChoice[]>>({})
   // The version this form was filled from. Sent with the save so that an edit
   // somebody else made in the meantime is refused instead of being overwritten,

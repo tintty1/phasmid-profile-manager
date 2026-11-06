@@ -5,7 +5,7 @@ They need a local build and checkout, named the way the app takes them:
     PPM_PHASMID_BINARY=/path/to/chrome PPM_PHASMID_SOURCE=/path/to/phasmid \\
         uv run pytest -m browser --no-network
 
-and the DB-IP database genprofile caches (Settings > Install browser fetches
+and the DB-IP database phasmid-profile-gen caches (Settings > Install browser fetches
 it). Pages are served from loopback, and the exit address a launch looks up is
 answered locally, so a run needs no internet.
 """

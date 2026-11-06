@@ -115,7 +115,7 @@ Launch response:
   version works. Use `browser.contexts[0]`; `browser.close()` only disconnects.
 - `args` (optional): extra Chrome switches. Avoid anything a page could observe.
 - `409` on launch: another manager instance holds the profile.
-- `400`: genprofile could not generate or move the machine (for example an exit
+- `400`: phasmid-profile-gen could not generate or move the machine (for example an exit
   address it cannot place).
 - `500` with a message: the browser is not installed, the proxy did not answer
   (the launch is refused rather than started at the wrong location), the mode is

@@ -49,14 +49,13 @@ app, with **Retry download** if something fails. The install:
 - finds the newest release of [tintty1/phasmid](https://github.com/tintty1/phasmid/releases)
   that has a Linux x64 build (pre-releases count), downloads `phasmid-<tag>-linux-x64.tar.zst`, checks it
   against the `.sha256` published beside it, and unpacks it;
-- downloads Phasmid's source tree at the same tag, for `tools/genprofile` (which
-  generates every profile's machine) and `tools/proxyroute` (which carries proxy
-  credentials Chrome cannot send);
-- has genprofile download the DB-IP City Lite database it places exit addresses
-  with, about 60 MB.
+- downloads Phasmid's source tree at the same tag, for `tools/proxyroute`
+  (which carries proxy credentials Chrome cannot send);
+- has phasmid-profile-gen, which generates every profile's machine, download
+  the DB-IP City Lite database it places exit addresses with, about 60 MB.
 
 The browser and source go into `phasmid/<tag>/` in the data folder; the database
-goes into genprofile's cache, `$XDG_CACHE_HOME/phasmid/geoip` (by default
+goes into phasmid-profile-gen's cache, `$XDG_CACHE_HOME/phasmid/geoip` (by default
 `~/.cache/phasmid/geoip`). An interrupted install leaves the previous one in
 use. `PPM_PHASMID_RELEASE` installs a given tag; `PPM_PHASMID_BINARY` and
 `PPM_PHASMID_SOURCE` use a local build and checkout instead.
@@ -66,8 +65,8 @@ use. `PPM_PHASMID_RELEASE` installs a given tag; `PPM_PHASMID_BINARY` and
 1. Choose **Create first profile** or **New profile**, and give it a name you
    recognise.
 2. Choose Linux or Windows. Leave the advanced settings (GPU, languages,
-   timezone, WebRTC policy) at their defaults: genprofile picks a GPU from
-   captured devices, and the location follows the proxy.
+   timezone, WebRTC policy) at their defaults: a GPU is drawn from captured
+   devices, and the location follows the proxy.
 3. Add a proxy if you have one, and click **Check proxy** before relying on it.
    It shows where the proxy comes out and anything a page could notice.
 4. Click **Run**. The arrow beside it chooses **Headless**, **Virtual display**

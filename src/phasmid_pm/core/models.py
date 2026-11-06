@@ -85,7 +85,7 @@ class ProxyConfig(BaseModel):
 
 
 class BrowserSettings(BaseModel):
-    """What a person chooses about a profile's machine; Phasmid's genprofile does the rest.
+    """What a person chooses about a profile's machine; phasmid-profile-gen does the rest.
 
     The machine itself (``Profile.fingerprint``) is a full Phasmid profile,
     generated from these settings once and replayed on every launch. ``os`` and

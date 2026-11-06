@@ -306,11 +306,11 @@ of each cleared profile places its machine at the exit again.
 GET /api/v1/fingerprints/gpus?os=windows
 ```
 
-The GPUs a generated machine may claim: those captured on a real host, and
-those the captured host class backs with the same WebGL surface (genprofile's
-claims). Wrapped in the action envelope: `data.gpus`, each entry
+The GPUs a generated machine may claim: those of the real devices
+phasmid-profile-gen has captures of. Wrapped in the action envelope: `data.gpus`, each entry
 `{os, gpu, renderer, weight}`, and `data.total`. Pass `gpu` as
-`browser_settings.gpu`. `weight` is how often it is drawn when no GPU is chosen.
+`browser_settings.gpu`. `weight` is how many captures have it, so how often it is drawn when no GPU is
+chosen.
 The list is empty until the browser is installed.
 
 ## Checking a proxy
@@ -324,8 +324,8 @@ Both reach the internet through the proxy and return the same shape:
 `reachable`, `error`, `latency_ms`, the `location` it comes out at (`ip`,
 `country`, `timezone`, `latitude`, `longitude`) and `findings`, each with a
 `level` of `error`, `warning` or `info`, the `field` it concerns and a message.
-The location is placed by genprofile with DB-IP City Lite, so it needs the
-browser installed; without it, a working proxy is reported with only its `ip`
+The location is placed by phasmid-profile-gen with DB-IP City Lite, so it
+needs the location database (*Install browser* fetches it); without it, a working proxy is reported with only its `ip`
 and a note.
 
 A proxy that does not answer is reported with `reachable: false` and an `error`,
@@ -365,7 +365,7 @@ What a launch does, step by step, is in
 
 | Status | When |
 | --- | --- |
-| `400` | genprofile could not generate or move the machine (for example an exit address DB-IP cannot place) |
+| `400` | phasmid-profile-gen could not generate or move the machine (for example an exit address DB-IP cannot place) |
 | `404` | No such profile |
 | `409` | Another instance holds the profile's lease |
 | `500` | The browser is not installed; a proxied launch whose proxy did not answer; the mode is unavailable here; the browser exited during startup or did not open its CDP port within 45 seconds. The message says which |
@@ -506,8 +506,7 @@ before-update checkpoints are kept separately.
 Browser status is `{installed, version, state, progress, message, error}`, where
 `state` is `idle`, `downloading`, `ready` or `error`, and `progress` is 0-100 or
 null. `installed` is true only when the binary, the source tree with
-`tools/genprofile` and `tools/proxyroute`, and the location database are all
-present. GET downloads nothing. POST starts a background install in this
+`tools/proxyroute`, and the location database are all present. GET downloads nothing. POST starts a background install in this
 process, and repeated POSTs while it runs reuse it; poll GET to see it finish.
 The install:
 
@@ -518,7 +517,7 @@ The install:
    `<data dir>/phasmid/<tag>/browser`;
 3. downloads the source tree at the tag from GitHub into
    `<data dir>/phasmid/<tag>/source`;
-4. has genprofile download the DB-IP City Lite build it pins (about 60 MB,
+4. has phasmid-profile-gen download the DB-IP City Lite build it pins (about 60 MB,
    127 MB unpacked) into `$XDG_CACHE_HOME/phasmid/geoip`;
 5. writes `<data dir>/phasmid/current` last, so an interrupted install leaves the
    previous one in use.

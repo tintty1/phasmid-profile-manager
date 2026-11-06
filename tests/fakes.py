@@ -137,15 +137,13 @@ FAKE_GPUS = [
 
 
 class FakeGenprofile:
-    """Answers run_genprofile() the way the real driver does, without a source tree."""
+    """Answers run_genprofile() the way the real driver does, without phasmid-profile-gen."""
 
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict[str, Any]]] = []
         self.fail: str | None = None
 
-    def __call__(
-        self, command: str, args: dict[str, Any] | None = None, installation: Any = None
-    ) -> dict[str, Any]:
+    def __call__(self, command: str, args: dict[str, Any] | None = None) -> dict[str, Any]:
         from phasmid_pm.core.browser_install import GenprofileError
 
         args = dict(args or {})

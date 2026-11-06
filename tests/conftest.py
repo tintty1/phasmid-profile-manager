@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 
 import pytest
 
-from phasmid_pm.core import browser_install, proxy_check
+from phasmid_pm.core import browser_install, machine, proxy_check
 from phasmid_pm.core.browser_install import Installation
 from phasmid_pm.core.database import StorageManager
 from phasmid_pm.core.profile_manager import ProfileManager
@@ -135,6 +135,7 @@ def phasmid(tmp_path, monkeypatch, request) -> FakePhasmid:
         return fake.installation
 
     monkeypatch.setattr(browser_install, "run_genprofile", fake.genprofile)
+    machine._gpus.cache_clear()
     monkeypatch.setattr(
         browser_install, "installed_browser", lambda: (fake.installed, fake.installation.version)
     )

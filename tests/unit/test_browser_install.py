@@ -2,7 +2,6 @@
 
 import hashlib
 import io
-import json
 import tarfile
 import textwrap
 import time
@@ -11,6 +10,7 @@ from pathlib import Path
 import httpx
 import pytest
 import zstandard
+from phasmid_profile_gen import geoip
 
 from phasmid_pm.config import get_settings
 from phasmid_pm.core import browser_install
@@ -19,7 +19,6 @@ from phasmid_pm.core.browser_session import BrowserLaunchError
 
 TAG = "155.0.8059.84-p1"
 REPO = "tintty1/phasmid"
-PIN_SHA = "c839d407" * 8
 
 
 @pytest.fixture(autouse=True)
@@ -27,7 +26,12 @@ def isolated(tmp_path, monkeypatch):
     """A data directory and a geoip cache of this test's own."""
     monkeypatch.setenv("PPM_DB_PATH", str(tmp_path / "data" / "profiles.db"))
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
-    for name in ("PPM_PHASMID_BINARY", "PPM_PHASMID_SOURCE", "PPM_PHASMID_RELEASE"):
+    for name in (
+        "PPM_PHASMID_BINARY",
+        "PPM_PHASMID_SOURCE",
+        "PPM_PHASMID_RELEASE",
+        geoip.ENV_MMDB,
+    ):
         monkeypatch.delenv(name, raising=False)
     get_settings.cache_clear()
     yield
@@ -48,9 +52,6 @@ def tar_bytes(files: dict[str, bytes], top: str, mode: str = "w") -> bytes:
 def source_files() -> dict[str, bytes]:
     return {
         "chromium_version.txt": b"155.0.8059.84\n",
-        "profiles/schema.json": b"{}",
-        "tools/genprofile/genprofile/generate.py": b"",
-        "tools/genprofile/dbip-city-lite.json": json.dumps({"sha256": PIN_SHA}).encode(),
         "tools/proxyroute/proxyroute.py": b"",
     }
 
@@ -64,7 +65,8 @@ def write_source(root: Path) -> Path:
 
 
 def write_geoip(tmp_path: Path) -> None:
-    path = tmp_path / "cache" / "phasmid" / "geoip" / PIN_SHA / "dbip-city-lite.mmdb"
+    """The database phasmid-profile-gen pins, as if it had downloaded it."""
+    path = tmp_path / "cache" / "phasmid" / "geoip" / geoip.pin().sha256 / "dbip-city-lite.mmdb"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(b"mmdb")
 
@@ -119,7 +121,7 @@ def github(monkeypatch, tmp_path):
 
     monkeypatch.setattr(browser_install.httpx, "Client", client)
 
-    def fake_genprofile(command, args=None, installation=None):
+    def fake_genprofile(command, args=None):
         assert command == "geoip"
         write_geoip(tmp_path)
         return {"path": "mmdb"}
@@ -170,6 +172,14 @@ def test_without_the_location_database_it_is_not_ready(tmp_path):
     (root / "current").write_text(TAG)
 
     assert browser_install.installed_browser() == (False, TAG)
+
+
+def test_a_location_database_named_in_the_environment_is_used(tmp_path, monkeypatch):
+    mmdb = tmp_path / "other.mmdb"
+    monkeypatch.setenv(geoip.ENV_MMDB, str(mmdb))
+    assert not browser_install.geoip_ready()
+    mmdb.write_bytes(b"mmdb")
+    assert browser_install.geoip_ready()
 
 
 def test_a_current_file_naming_a_path_is_ignored(tmp_path):
@@ -293,7 +303,7 @@ def driver(tmp_path, monkeypatch):
         textwrap.dedent(
             """\
             import json, sys
-            mode = json.loads(sys.argv[3]).get("mode")
+            mode = json.loads(sys.argv[2]).get("mode")
             if mode == "ok":
                 print(json.dumps({"profile": {"seed": "s"}}))
             elif mode == "refused":
@@ -306,25 +316,20 @@ def driver(tmp_path, monkeypatch):
         )
     )
     monkeypatch.setattr(browser_install, "DRIVER", script)
-    return Installation("x", tmp_path / "chrome", write_source(tmp_path / "src"))
 
 
-def test_genprofile_answers_are_returned(driver):
-    assert browser_install.run_genprofile("generate", {"mode": "ok"}, driver) == {
-        "profile": {"seed": "s"}
-    }
+@pytest.mark.usefixtures("driver")
+def test_genprofile_answers_are_returned():
+    assert browser_install.run_genprofile("generate", {"mode": "ok"}) == {"profile": {"seed": "s"}}
 
 
-def test_a_refusal_is_raised_in_genprofiles_words(driver):
+@pytest.mark.usefixtures("driver")
+def test_a_refusal_is_raised_in_genprofiles_words():
     with pytest.raises(GenprofileError, match="no capture"):
-        browser_install.run_genprofile("generate", {"mode": "refused"}, driver)
+        browser_install.run_genprofile("generate", {"mode": "refused"})
 
 
-def test_a_crash_reports_the_end_of_stderr(driver):
+@pytest.mark.usefixtures("driver")
+def test_a_crash_reports_the_end_of_stderr():
     with pytest.raises(GenprofileError, match="something broke"):
-        browser_install.run_genprofile("generate", {"mode": "crash"}, driver)
-
-
-def test_without_a_source_tree_genprofile_cannot_run():
-    with pytest.raises(GenprofileError, match="source tree"):
-        browser_install.run_genprofile("gpus")
+        browser_install.run_genprofile("generate", {"mode": "crash"})

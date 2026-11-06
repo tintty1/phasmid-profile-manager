@@ -9,14 +9,14 @@ Problems with what the browser itself reports belong to
 ## Development setup
 
 The backend uses [uv](https://docs.astral.sh/uv/) and needs Python 3.12 or
-newer, because Phasmid's genprofile does. It runs on Linux x64 only.
+newer, because phasmid-profile-gen does. It runs on Linux x64 only.
 
 ```bash
 uv sync --extra dev
 ```
 
 For the browser tests you need a Phasmid build and a checkout of the same
-version, and the DB-IP database genprofile caches. The simplest way to get all
+version, and the DB-IP database phasmid-profile-gen caches. The simplest way to get all
 three is to run the app once and click **Install browser**; the release is then
 in `data/phasmid/<tag>/browser/chrome` and `data/phasmid/<tag>/source`.
 
@@ -61,10 +61,10 @@ uv run python scripts/build_webui.py
 ## Testing conventions
 
 - **`-m browser` means the test needs a real Phasmid**, not merely that it is
-  slow. The fast suite replaces the browser with a fake executable and genprofile
-  with a fake generator (`tests/fakes.py`, `tests/conftest.py`), and answers the
+  slow. The fast suite replaces the browser with a fake executable and
+  phasmid-profile-gen with a fake generator (`tests/fakes.py`, `tests/conftest.py`), and answers the
   exit-address lookup locally. Anything that needs the real binary or the real
-  genprofile belongs under `-m browser`; CI does not install Phasmid, so an
+  generator belongs under `-m browser`; CI does not install Phasmid, so an
   unmarked test that needs it fails there while passing on your machine. Browser
   tests skip themselves unless `PPM_PHASMID_BINARY` and `PPM_PHASMID_SOURCE` are
   set and the DB-IP database is cached.
@@ -99,9 +99,9 @@ uv run python scripts/build_webui.py
 - **The FastAPI lifespan in `main.py`** builds the storage and profile manager
   from the settings on startup. The integration tests inject their own instead,
   which is what lets each of them have a throwaway database.
-- **`core/genprofile_driver.py`** runs inside the Phasmid source tree, where
-  genprofile is importable. It is excluded from mypy, the unit tests replace it
-  with a stand-in script, and only the browser tests run it for real.
+- **`core/genprofile_driver.py`** runs phasmid-profile-gen in a child process.
+  The unit tests replace it with a stand-in script, and only the browser tests
+  run it for real.
 
 Most remaining uncovered lines are `except Exception -> 500` handlers, which
 exist for failures that cannot be provoked without breaking SQLite underneath

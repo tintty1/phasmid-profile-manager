@@ -40,7 +40,7 @@ class Settings(BaseSettings):
     # Phasmid. By default the newest release of phasmid_repo is installed into
     # <data dir>/phasmid on request (Settings > Install browser). A local build
     # and checkout can be used instead: phasmid_binary is the chrome executable,
-    # phasmid_source a Phasmid source tree (tools/genprofile, tools/proxyroute).
+    # phasmid_source a Phasmid source tree (for tools/proxyroute).
     phasmid_repo: str = "tintty1/phasmid"
     phasmid_release: str | None = None
     phasmid_binary: str | None = None

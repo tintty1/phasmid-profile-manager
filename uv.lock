@@ -48,15 +48,6 @@ wheels = [
 ]
 
 [[package]]
-name = "apify-fingerprint-datapoints"
-version = "0.15.0"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/88/3e/d52b92dd3efe64d21b7652cc8b85d6948beef220c24ceaafd95f4d587047/apify_fingerprint_datapoints-0.15.0.tar.gz", hash = "sha256:5776fe73feaa3910265cae55599552b098f3a716d8872c9a0c2295ff2bb680dc", size = 943698 }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/d9/05/14521197ae61dba29f01dd23264d7457aa402568b92bf3fb89fd12a5d6db/apify_fingerprint_datapoints-0.15.0-py3-none-any.whl", hash = "sha256:fc9299b3136880f47b468897cd00ac622ad2c2a93e9cc9f972d10dbf5ed2b3aa", size = 761805 },
-]
-
-[[package]]
 name = "argon2-cffi"
 version = "25.1.0"
 source = { registry = "https://pypi.org/simple" }
@@ -179,19 +170,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/7a/71/cca6167c06d00c81375fd668719df245864076d284f7cb46a694cbeb5454/bottle-0.13.4.tar.gz", hash = "sha256:787e78327e12b227938de02248333d788cfe45987edca735f8f88e03472c3f47", size = 98717 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/83/f6/b55ec74cfe68c6584163faa311503c20b0da4c09883a41e8e00d6726c954/bottle-0.13.4-py2.py3-none-any.whl", hash = "sha256:045684fbd2764eac9cdeb824861d1551d113e8b683d8d26e296898d3dd99a12e", size = 103807 },
-]
-
-[[package]]
-name = "browserforge"
-version = "1.2.4"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "apify-fingerprint-datapoints" },
-    { name = "click" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/78/6f/8975af88d203efd70cc69477ebac702babef38201d04621c9583f2508f25/browserforge-1.2.4.tar.gz", hash = "sha256:05686473793769856ebd3528c69071f5be0e511260993e8b2ba839863711a0c4", size = 36700 }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/dd/35/ce962f738ae28ffce6293e7607b129075633e6bb185a5ab87e49246eedc2/browserforge-1.2.4-py3-none-any.whl", hash = "sha256:fb1c14e62ac09de221dcfc73074200269f697596c642cb200ceaab1127a17542", size = 37890 },
 ]
 
 [[package]]
@@ -1011,30 +989,44 @@ wheels = [
 ]
 
 [[package]]
+name = "phasmid-profile-gen"
+version = "0.1.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "jsonschema" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/8f/06/a26b54fb8267a5aa5a239a66e26584c08a2a24d74f976468d5caa0bd14f3/phasmid_profile_gen-0.1.1.tar.gz", hash = "sha256:0c94d1d2d474e61bafd4e8c76ff8fd7c0d5082e1fc81666db6284ccc8fde0bc8", size = 111292 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/42/5a/1ccd543990d8b30a43d4758e1825d39e97a1701035b66102fc7597eeac88/phasmid_profile_gen-0.1.1-py3-none-any.whl", hash = "sha256:4dfcbb7f5d2c82330d5b587903d1bbc9584882414769135ab565208c778c5a8f", size = 57472 },
+]
+
+[package.optional-dependencies]
+location = [
+    { name = "maxminddb" },
+    { name = "timezonefinder" },
+    { name = "timezonefinder-data" },
+]
+
+[[package]]
 name = "phasmid-profile-manager"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "aiofiles" },
-    { name = "apify-fingerprint-datapoints" },
     { name = "argon2-cffi" },
-    { name = "browserforge" },
     { name = "cryptography" },
     { name = "fastapi" },
     { name = "httpx", extra = ["socks"] },
-    { name = "jsonschema" },
     { name = "loguru" },
-    { name = "maxminddb" },
     { name = "openpyxl" },
     { name = "packaging" },
+    { name = "phasmid-profile-gen", extra = ["location"] },
     { name = "psutil" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "python-dotenv" },
     { name = "python-multipart" },
     { name = "sqlalchemy" },
-    { name = "timezonefinder" },
-    { name = "timezonefinder-data" },
     { name = "uvicorn", extra = ["standard"] },
     { name = "websockets" },
     { name = "zstandard" },
@@ -1056,18 +1048,15 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "aiofiles", specifier = ">=24.1" },
-    { name = "apify-fingerprint-datapoints", specifier = "==0.15.0" },
     { name = "argon2-cffi", specifier = ">=23.1" },
-    { name = "browserforge", specifier = "==1.2.4" },
     { name = "cryptography", specifier = ">=44.0" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "httpx", extras = ["socks"], specifier = ">=0.28" },
-    { name = "jsonschema", specifier = ">=4.23" },
     { name = "loguru", specifier = ">=0.7" },
-    { name = "maxminddb", specifier = "==3.2.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.13" },
     { name = "openpyxl", specifier = ">=3.1" },
     { name = "packaging", specifier = ">=24.1" },
+    { name = "phasmid-profile-gen", extras = ["location"], specifier = "==0.1.1" },
     { name = "playwright", marker = "extra == 'dev'", specifier = ">=1.60" },
     { name = "psutil", specifier = ">=6.1" },
     { name = "pydantic", specifier = ">=2.10" },
@@ -1080,8 +1069,6 @@ requires-dist = [
     { name = "pywebview", marker = "extra == 'desktop'", specifier = ">=5.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.8" },
     { name = "sqlalchemy", specifier = ">=2.0" },
-    { name = "timezonefinder", specifier = "==9.2.0" },
-    { name = "timezonefinder-data", specifier = "==4.2026.5" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
     { name = "websockets", specifier = ">=13" },
     { name = "zstandard", specifier = ">=0.25.0" },

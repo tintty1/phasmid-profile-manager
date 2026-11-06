@@ -80,7 +80,7 @@ RUN uv sync --no-dev --frozen
 COPY --from=webui /web/out ./src/phasmid_pm/webui
 
 # Everything that persists lives in /data: the database, profile directories,
-# the installed Phasmid release, and genprofile's DB-IP cache.
+# the installed Phasmid release, and phasmid-profile-gen's DB-IP cache.
 ENV PPM_VNC=1 \
     PPM_HOST=0.0.0.0 \
     PPM_PORT=8000 \

@@ -109,11 +109,11 @@ What protects a session:
   it against the `.sha256` published in the same release. That detects a
   corrupted download, not a compromised release. The source tree at the same
   tag is downloaded from GitHub over TLS with no further check, and its
-  `tools/genprofile` and `tools/proxyroute` run with the app's own Python
-  interpreter. Archives are unpacked with tarfile's `data` filter, which refuses
-  absolute paths, `..`, device files and links leaving the archive. genprofile
-  downloads its DB-IP database and checks it against the SHA-256 pinned in the
-  source tree.
+  `tools/proxyroute` runs with the app's own Python interpreter. Archives are
+  unpacked with tarfile's `data` filter, which refuses absolute paths, `..`,
+  device files and links leaving the archive. phasmid-profile-gen, a pinned
+  PyPI dependency, downloads its DB-IP database and checks it against the
+  SHA-256 pinned in the package.
 - **Every launch and every proxy check** asks a plain-text IP echo service,
   through the profile's proxy, for the exit address: `api.ipify.org`, then
   `checkip.amazonaws.com`, then `icanhazip.com`, over verified TLS. Without a

@@ -30,7 +30,7 @@ errors. Columns are found by their header text, so they can be reordered or
 removed; only *Profile name* is required.
 
 Imported profiles have no machine: the spreadsheet does not carry one, and
-generating a hundred machines would make the import wait on genprofile for each
+generating a hundred machines would make the import wait on the generator for each
 row. Each profile gets its machine on its first launch, from the row's OS and
 GPU, placed at its exit address.
 
@@ -43,7 +43,7 @@ GPU, placed at its exit address.
 | Group | The group's ID, as exported. Empty for none. |
 | Status | `active`, `inactive`, `blocked`, `maintenance`. Empty means `active`. |
 | Operating system | `linux` or `windows`. Empty means `linux`. |
-| GPU | `<vendor_id>:<device_id>`, e.g. `0x10de:0x2504`, from `GET /api/v1/fingerprints/gpus`. Empty: genprofile draws one. |
+| GPU | `<vendor_id>:<device_id>`, e.g. `0x10de:0x2504`, from `GET /api/v1/fingerprints/gpus`. Empty: one is drawn from the captures. |
 | Browser languages | Comma-separated, e.g. `en-US, en`. Empty: follow the proxy. |
 | Timezone | IANA name, e.g. `Europe/Berlin`. Empty: follow the proxy. |
 | WebRTC policy | `default`, `default_public_interface_only`, `default_public_and_private_interfaces` or `disable_non_proxied_udp`. Empty means `default`. |

@@ -104,7 +104,10 @@ class GpuChoice(BaseModel):
     os: str
     gpu: str = Field(..., description="'<vendor_id>:<device_id>', the browser_settings.gpu value")
     renderer: str = Field(..., description="The WebGL unmasked renderer pages will see")
-    weight: int = Field(..., description="How often it is drawn when no GPU is chosen")
+    weight: int = Field(
+        ...,
+        description="How many captures have it, so how often it is drawn when no GPU is chosen",
+    )
 
 
 class GpuListData(BaseModel):

@@ -10,17 +10,17 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
 
-from phasmid_pm import __version__
-from phasmid_pm.api.dependencies import (
+from phasmid_profile_manager import __version__
+from phasmid_profile_manager.api.dependencies import (
     require_auth,
     set_profile_manager,
     set_scheduler,
     set_storage_manager,
 )
-from phasmid_pm.api.errors import install_error_handlers
-from phasmid_pm.api.middleware.logging import LoggingMiddleware
-from phasmid_pm.api.models.system import ErrorResponse, HealthResponse
-from phasmid_pm.api.routes import (
+from phasmid_profile_manager.api.errors import install_error_handlers
+from phasmid_profile_manager.api.middleware.logging import LoggingMiddleware
+from phasmid_profile_manager.api.models.system import ErrorResponse, HealthResponse
+from phasmid_profile_manager.api.routes import (
     auth,
     automation,
     groups,
@@ -31,11 +31,11 @@ from phasmid_pm.api.routes import (
     system,
     viewer,
 )
-from phasmid_pm.config import get_settings
-from phasmid_pm.core.backups import ProfileBackupManager
-from phasmid_pm.core.database import StorageManager
-from phasmid_pm.core.profile_manager import ProfileManager
-from phasmid_pm.core.scheduler import TaskScheduler
+from phasmid_profile_manager.config import get_settings
+from phasmid_profile_manager.core.backups import ProfileBackupManager
+from phasmid_profile_manager.core.database import StorageManager
+from phasmid_profile_manager.core.profile_manager import ProfileManager
+from phasmid_profile_manager.core.scheduler import TaskScheduler
 
 settings = get_settings()
 
@@ -196,7 +196,7 @@ for _prefix, _in_schema in (("/api/v1", True), ("/api", False)):
 )
 async def health_check():
     """Report API and database health. Unversioned so probes survive API versions."""
-    from phasmid_pm.api.dependencies import get_profile_manager
+    from phasmid_profile_manager.api.dependencies import get_profile_manager
 
     try:
         profile_mgr = get_profile_manager()
@@ -257,7 +257,7 @@ if __name__ == "__main__":
     import uvicorn
 
     uvicorn.run(
-        "phasmid_pm.main:app",
+        "phasmid_profile_manager.main:app",
         host=settings.host,
         port=settings.port,
         reload=True,

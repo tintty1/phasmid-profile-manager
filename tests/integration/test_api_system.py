@@ -4,9 +4,9 @@ import shutil
 
 import pytest
 
-from phasmid_pm.api import dependencies
-from phasmid_pm.api.dependencies import get_profile_manager
-from phasmid_pm.config import get_settings
+from phasmid_profile_manager.api import dependencies
+from phasmid_profile_manager.api.dependencies import get_profile_manager
+from phasmid_profile_manager.config import get_settings
 from tests.fakes import launch_through_api
 
 

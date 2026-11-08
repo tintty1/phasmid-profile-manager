@@ -3,7 +3,7 @@
 import httpx
 import pytest
 
-from phasmid_pm.core import updates
+from phasmid_profile_manager.core import updates
 
 
 @pytest.fixture

@@ -4,7 +4,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from phasmid_pm.core.models import (
+from phasmid_profile_manager.core.models import (
     Schedule,
     ScheduleAction,
     ScheduleKind,

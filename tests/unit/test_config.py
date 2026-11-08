@@ -1,6 +1,6 @@
 """Tests for environment-based application settings."""
 
-from phasmid_pm.config import Settings
+from phasmid_profile_manager.config import Settings
 
 
 def test_defaults_are_local_and_safe():
@@ -28,7 +28,7 @@ def test_the_reported_version_matches_the_package_metadata():
     /health and in the OpenAPI schema."""
     from importlib.metadata import version
 
-    from phasmid_pm import __version__
+    from phasmid_profile_manager import __version__
 
     assert __version__ == version("phasmid-profile-manager")
     assert __version__ != "0.0.0+unknown", "the package should be installed for the test run"

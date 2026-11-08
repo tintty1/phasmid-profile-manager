@@ -9,8 +9,8 @@ from datetime import datetime
 
 import pytest
 
-from phasmid_pm.core.database import StaleWriteError, StorageManager
-from phasmid_pm.core.models import BrowserSettings, Profile
+from phasmid_profile_manager.core.database import StaleWriteError, StorageManager
+from phasmid_profile_manager.core.models import BrowserSettings, Profile
 
 
 async def _profile(storage: StorageManager, name: str = "p") -> Profile:
@@ -250,7 +250,7 @@ async def test_an_edit_made_while_a_launch_moves_the_machine_is_not_reverted(
     during that wait must survive. Here the rename lands during the lookup,
     exactly as another instance's save would.
     """
-    from phasmid_pm.core import proxy_check
+    from phasmid_profile_manager.core import proxy_check
 
     profile = await profile_manager.create_profile(name="before the launch")
     lookup = proxy_check.resolve_exit_ip

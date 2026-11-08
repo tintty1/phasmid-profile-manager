@@ -12,10 +12,10 @@ import pytest
 import zstandard
 from phasmid_profile_gen import geoip
 
-from phasmid_pm.config import get_settings
-from phasmid_pm.core import browser_install
-from phasmid_pm.core.browser_install import GenprofileError, Installation
-from phasmid_pm.core.browser_session import BrowserLaunchError
+from phasmid_profile_manager.config import get_settings
+from phasmid_profile_manager.core import browser_install
+from phasmid_profile_manager.core.browser_install import GenprofileError, Installation
+from phasmid_profile_manager.core.browser_session import BrowserLaunchError
 
 TAG = "155.0.8059.84-p1"
 REPO = "tintty1/phasmid"

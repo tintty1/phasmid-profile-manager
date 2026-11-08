@@ -896,7 +896,7 @@ class DatabaseManager:
 
         A plain read, so it reports an expired lease exactly as stored. Callers
         asking "is this held right now" pass the expiry through
-        :func:`~phasmid_pm.core.leases.lease_expired`, or simply try to acquire.
+        :func:`~phasmid_profile_manager.core.leases.lease_expired`, or simply try to acquire.
         """
         cursor = self._connection.execute(
             "SELECT locked_by, lock_expires FROM profiles WHERE id = ?", (profile_id,)

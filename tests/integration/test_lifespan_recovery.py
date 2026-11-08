@@ -6,11 +6,11 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from phasmid_pm import main
-from phasmid_pm.api import dependencies
-from phasmid_pm.api.routes import recovery
-from phasmid_pm.core.database import StorageManager
-from phasmid_pm.core.profile_manager import ProfileManager
+from phasmid_profile_manager import main
+from phasmid_profile_manager.api import dependencies
+from phasmid_profile_manager.api.routes import recovery
+from phasmid_profile_manager.core.database import StorageManager
+from phasmid_profile_manager.core.profile_manager import ProfileManager
 
 
 @pytest.fixture

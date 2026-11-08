@@ -144,7 +144,7 @@ class FakeGenprofile:
         self.fail: str | None = None
 
     def __call__(self, command: str, args: dict[str, Any] | None = None) -> dict[str, Any]:
-        from phasmid_pm.core.browser_install import GenprofileError
+        from phasmid_profile_manager.core.browser_install import GenprofileError
 
         args = dict(args or {})
         self.calls.append((command, args))
@@ -205,7 +205,7 @@ async def launch_through_api(client: Any, name: str) -> tuple[str, Any]:
     Returns the profile id and its BrowserSession, so a test can see whether
     the process was ended.
     """
-    from phasmid_pm.api.dependencies import get_profile_manager
+    from phasmid_profile_manager.api.dependencies import get_profile_manager
 
     created = await client.post("/api/profiles", json={"name": name})
     profile_id = created.json()["id"]

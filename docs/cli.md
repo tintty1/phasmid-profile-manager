@@ -29,7 +29,7 @@ phasmid-pm --desktop                # native window
 To stop the web server, press `Ctrl+C`; in desktop mode close the window.
 Any browsers it launched are closed with it.
 
-`python -m phasmid_pm.desktop` is the dedicated desktop launcher. It takes no
+`python -m phasmid_profile_manager.desktop` is the dedicated desktop launcher. It takes no
 flags, picks a free loopback port, and keeps its database and a generated
 encryption key in `$XDG_DATA_HOME/phasmid-profile-manager/` (by default
 `~/.local/share/phasmid-profile-manager/`). `phasmid-pm --desktop` uses the same
@@ -120,7 +120,7 @@ These live in `scripts/` and are for working on the project, not for daily use.
 ## Running from source without the console script
 
 ```bash
-uv run python -m phasmid_pm.main
+uv run python -m phasmid_profile_manager.main
 ```
 
 This starts the API with reload enabled and serves the UI if one has been built.

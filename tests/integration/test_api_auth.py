@@ -2,7 +2,7 @@
 
 import pytest
 
-from phasmid_pm.config import get_settings
+from phasmid_profile_manager.config import get_settings
 
 
 @pytest.mark.asyncio

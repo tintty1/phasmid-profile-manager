@@ -5,8 +5,8 @@ import json
 import pytest
 from cryptography.fernet import Fernet
 
-from phasmid_pm.config import get_settings
-from phasmid_pm.core.models import Profile, ProfileStatus, ProxyConfig, ProxyType
+from phasmid_profile_manager.config import get_settings
+from phasmid_profile_manager.core.models import Profile, ProfileStatus, ProxyConfig, ProxyType
 
 
 @pytest.mark.asyncio
@@ -126,7 +126,7 @@ async def test_a_pre_auth_database_gains_the_user_tables_without_losing_data(tmp
     it must add them and leave the existing rows exactly as they were."""
     import sqlite3
 
-    from phasmid_pm.core.database import StorageManager
+    from phasmid_profile_manager.core.database import StorageManager
 
     db_path = tmp_path / "old.db"
     old = sqlite3.connect(str(db_path))
@@ -174,7 +174,7 @@ async def test_a_database_from_before_protection_upgrades_with_nothing_protected
     """Upgrading adds the column; no existing profile becomes protected by it."""
     import sqlite3
 
-    from phasmid_pm.core.database import StorageManager
+    from phasmid_profile_manager.core.database import StorageManager
 
     path = tmp_path / "old.db"
     old = sqlite3.connect(path)

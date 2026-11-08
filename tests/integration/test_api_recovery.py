@@ -4,9 +4,9 @@ from pathlib import Path
 
 import pytest
 
-from phasmid_pm.api.dependencies import get_profile_manager
-from phasmid_pm.api.routes.recovery import set_backup_manager
-from phasmid_pm.core.backups import ProfileBackupManager
+from phasmid_profile_manager.api.dependencies import get_profile_manager
+from phasmid_profile_manager.api.routes.recovery import set_backup_manager
+from phasmid_profile_manager.core.backups import ProfileBackupManager
 
 
 @pytest.fixture

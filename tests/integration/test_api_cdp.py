@@ -14,9 +14,9 @@ from starlette.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 from websockets.asyncio.server import serve
 
-from phasmid_pm.api.routes import automation
-from phasmid_pm.core.download_watch import DownloadRegistry
-from phasmid_pm.main import app
+from phasmid_profile_manager.api.routes import automation
+from phasmid_profile_manager.core.download_watch import DownloadRegistry
+from phasmid_profile_manager.main import app
 
 URL = "/api/v1/profiles/p1/cdp"
 

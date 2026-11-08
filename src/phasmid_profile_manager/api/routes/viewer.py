@@ -14,9 +14,9 @@ from urllib.parse import urlsplit
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from loguru import logger
 
-from phasmid_pm.api.dependencies import credentials_ok, get_profile_manager
-from phasmid_pm.config import get_settings
-from phasmid_pm.core import auth
+from phasmid_profile_manager.api.dependencies import credentials_ok, get_profile_manager
+from phasmid_profile_manager.config import get_settings
+from phasmid_profile_manager.core import auth
 
 router = APIRouter()
 

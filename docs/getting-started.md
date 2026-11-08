@@ -25,7 +25,7 @@ or in a native window:
 ```bash
 uv sync --extra desktop
 uv run python scripts/build_webui.py
-uv run python -m phasmid_pm.desktop
+uv run python -m phasmid_profile_manager.desktop
 ```
 
 The window needs a pywebview GUI backend (GTK or Qt) and its system libraries;
@@ -113,7 +113,7 @@ The data folder is the directory of the database (`PPM_DB_PATH`):
 | Started with | Data folder |
 | --- | --- |
 | `phasmid-pm` | `data/` under the working directory |
-| `python -m phasmid_pm.desktop` or `phasmid-pm --desktop` | `$XDG_DATA_HOME/phasmid-profile-manager/`, by default `~/.local/share/phasmid-profile-manager/` |
+| `python -m phasmid_profile_manager.desktop` or `phasmid-pm --desktop` | `$XDG_DATA_HOME/phasmid-profile-manager/`, by default `~/.local/share/phasmid-profile-manager/` |
 | Docker | the `ppm-data` volume, mounted at `/data` |
 
 It holds `profiles.db`, each profile's browser data in `profiles/`, `backups/`,

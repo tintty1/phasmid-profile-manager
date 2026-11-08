@@ -2,7 +2,7 @@
 
 import pytest
 
-from phasmid_pm.api.dependencies import get_profile_manager
+from phasmid_profile_manager.api.dependencies import get_profile_manager
 from tests.fakes import launch_through_api
 
 

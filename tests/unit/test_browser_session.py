@@ -16,8 +16,8 @@ from pathlib import Path
 import psutil
 import pytest
 
-from phasmid_pm.core import browser_session as bs
-from phasmid_pm.core.browser_session import (
+from phasmid_profile_manager.core import browser_session as bs
+from phasmid_profile_manager.core.browser_session import (
     BrowserLaunchError,
     BrowserSessionManager,
     LaunchPlan,

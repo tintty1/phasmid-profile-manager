@@ -11,8 +11,8 @@ import sys
 
 import pytest
 
-from phasmid_pm import cli
-from phasmid_pm.config import get_settings
+from phasmid_profile_manager import cli
+from phasmid_profile_manager.config import get_settings
 
 
 @pytest.fixture
@@ -84,7 +84,7 @@ def test_a_real_address_is_opened_as_itself(run):
 
 def test_desktop_mode_hands_over_instead_of_serving_here(run, monkeypatch):
     """run_desktop starts its own server; starting a second one would take the port."""
-    from phasmid_pm import desktop
+    from phasmid_profile_manager import desktop
 
     asked: list[dict] = []
     monkeypatch.setattr(desktop, "run_desktop", lambda **kw: asked.append(kw))
@@ -121,7 +121,7 @@ def run_user(monkeypatch, tmp_path):
 
 
 async def _usernames(tmp_path) -> list[str]:
-    from phasmid_pm.core.database import StorageManager
+    from phasmid_profile_manager.core.database import StorageManager
 
     storage = StorageManager(str(tmp_path / "cli.db"))
     await storage.initialize()
@@ -173,8 +173,8 @@ def test_user_list_shows_names_and_never_hashes(run_user, capsys):
 
 
 def test_user_passwd_changes_the_password(run_user, tmp_path):
-    from phasmid_pm.core import auth
-    from phasmid_pm.core.database import StorageManager
+    from phasmid_profile_manager.core import auth
+    from phasmid_profile_manager.core.database import StorageManager
 
     run_user("add", "alice", prompts=["hunter22-long", "hunter22-long"])
     run_user("passwd", "alice", prompts=["new-password-9", "new-password-9"])
@@ -190,3 +190,9 @@ def test_user_passwd_changes_the_password(run_user, tmp_path):
             await storage.close()
 
     assert asyncio.run(check())
+
+
+def test_serve_is_the_default_spelled_out(run):
+    """Flags work on either side of `serve`; the ones before it are not reset."""
+    assert run("--port", "9124", "serve", "--no-browser")["uvicorn"]["port"] == 9124
+    assert run("serve", "--port", "9125", "--no-browser")["uvicorn"]["port"] == 9125

@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from phasmid_pm.core import auth
+from phasmid_profile_manager.core import auth
 
 
 def test_password_hash_is_argon2id_and_never_the_password():

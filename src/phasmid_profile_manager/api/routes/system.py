@@ -8,9 +8,9 @@ import psutil
 from fastapi import APIRouter, HTTPException
 from loguru import logger
 
-from phasmid_pm import __version__
-from phasmid_pm.api.dependencies import get_profile_manager, get_storage_manager
-from phasmid_pm.api.models.system import (
+from phasmid_profile_manager import __version__
+from phasmid_profile_manager.api.dependencies import get_profile_manager, get_storage_manager
+from phasmid_profile_manager.api.models.system import (
     ApiResponse,
     GpuChoice,
     GpuListData,
@@ -20,10 +20,10 @@ from phasmid_pm.api.models.system import (
     SystemInfoData,
     SystemStatusResponse,
 )
-from phasmid_pm.config import get_settings
-from phasmid_pm.core import machine
-from phasmid_pm.core.browser_install import installed_browser
-from phasmid_pm.core.cleanup import ProfileCleanupManager
+from phasmid_profile_manager.config import get_settings
+from phasmid_profile_manager.core import machine
+from phasmid_profile_manager.core.browser_install import installed_browser
+from phasmid_profile_manager.core.cleanup import ProfileCleanupManager
 
 router = APIRouter()
 

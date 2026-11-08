@@ -14,6 +14,10 @@ The port of camoufox-profile-manager from Camoufox (Firefox via Playwright) to
 Phasmid (Chromium), driven over CDP.
 
 ### Added
+- *Copy CDP URL* in the browser viewer's toolbar, beside the one in a profile's
+  menu. Copying falls back to `execCommand` when the UI is served over plain
+  http (no `navigator.clipboard`), and shows the URL to copy by hand if that
+  fails too.
 - Per-profile downloads: each profile saves into `<data dir>/downloads/<id>/`,
   listed, fetched and deleted with
   `GET|DELETE /api/v1/profiles/{id}/downloads[/{name}]`, and shown in the web
@@ -57,8 +61,10 @@ Phasmid (Chromium), driven over CDP.
 - The agent skill drives profiles with `connect_over_cdp`.
 
 ### Changed
-- Package `camoufox_pm` is now `phasmid_pm`, the command `camoufox-pm` is now
-  `phasmid-pm`, and the environment prefix `CPM_` is now `PPM_`.
+- Package `camoufox_pm` is now `phasmid_profile_manager`, the command
+  `camoufox-pm` is now `phasmid-profile-manager` (alias `phasmid-pm`, or
+  `python -m phasmid_profile_manager`), and the environment prefix `CPM_` is
+  now `PPM_`. Published to PyPI as `phasmid-profile-manager`.
 - Requires Python 3.12 or newer (phasmid-profile-gen needs it). CI runs 3.12 and 3.13.
 - New profiles default to Linux.
 - Schedules have one action, `launch`.

@@ -7,7 +7,7 @@ The older tests in this directory deliberately keep calling the unversioned
 
 import pytest
 
-from phasmid_pm.main import app
+from phasmid_profile_manager.main import app
 
 
 @pytest.mark.asyncio
@@ -62,7 +62,7 @@ async def test_late_validation_errors_use_the_same_shape(client):
 
 @pytest.mark.asyncio
 async def test_auth_failures_use_the_same_shape(client, monkeypatch):
-    from phasmid_pm.config import get_settings
+    from phasmid_profile_manager.config import get_settings
 
     monkeypatch.setenv("PPM_API_KEY", "top-secret")
     get_settings.cache_clear()
@@ -78,7 +78,7 @@ async def test_auth_failures_use_the_same_shape(client, monkeypatch):
 async def test_health_reports_unhealthy_as_503(client, monkeypatch):
     """A healthy-looking 200 would hide the failure from probes that only read
     the status code."""
-    from phasmid_pm.api import dependencies
+    from phasmid_profile_manager.api import dependencies
 
     monkeypatch.setattr(dependencies, "_profile_manager", None)
     response = await client.get("/health")

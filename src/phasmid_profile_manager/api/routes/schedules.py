@@ -3,8 +3,8 @@
 from fastapi import APIRouter, HTTPException, status
 from loguru import logger
 
-from phasmid_pm.api.dependencies import get_scheduler, get_storage_manager
-from phasmid_pm.api.models.schedules import (
+from phasmid_profile_manager.api.dependencies import get_scheduler, get_storage_manager
+from phasmid_profile_manager.api.models.schedules import (
     ScheduleCreateRequest,
     ScheduleListResponse,
     ScheduleResponse,
@@ -12,9 +12,9 @@ from phasmid_pm.api.models.schedules import (
     ScheduleRunResponse,
     ScheduleUpdateRequest,
 )
-from phasmid_pm.api.models.system import ApiResponse
-from phasmid_pm.core.models import Schedule
-from phasmid_pm.core.scheduler import next_run_after
+from phasmid_profile_manager.api.models.system import ApiResponse
+from phasmid_profile_manager.core.models import Schedule
+from phasmid_profile_manager.core.scheduler import next_run_after
 
 router = APIRouter()
 

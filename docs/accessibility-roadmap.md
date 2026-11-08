@@ -7,7 +7,7 @@ current path.
 
 ## In place
 
-- A dedicated desktop entry point (`python -m phasmid_pm.desktop`) opens a
+- A dedicated desktop entry point (`python -m phasmid_profile_manager.desktop`) opens a
   native window. The `phasmid-pm` CLI remains for source and server
   deployments.
 - A writable data folder (`$XDG_DATA_HOME/phasmid-profile-manager/`) keeps the

@@ -12,8 +12,8 @@ from pathlib import Path
 
 import pytest
 
-from phasmid_pm.core.browser_session import BrowserLaunchError
-from phasmid_pm.core.leases import ProfileLocked
+from phasmid_profile_manager.core.browser_session import BrowserLaunchError
+from phasmid_profile_manager.core.leases import ProfileLocked
 from tests.fakes import fake_pin
 
 PINNED = fake_pin("windows", seed="77" * 16, public_ip="203.0.113.10")

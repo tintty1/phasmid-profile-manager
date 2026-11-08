@@ -2,7 +2,7 @@
 
 import pytest
 
-from phasmid_pm.api import dependencies
+from phasmid_profile_manager.api import dependencies
 
 
 async def make_profile(client, name="scheduled") -> str:

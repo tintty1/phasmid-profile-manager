@@ -27,9 +27,9 @@ from loguru import logger
 from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosed
 
-from phasmid_pm.api.dependencies import credentials_ok, get_profile_manager
-from phasmid_pm.api.routes.viewer import _api_key_from_protocols, _origin_allowed
-from phasmid_pm.core import auth, download_watch
+from phasmid_profile_manager.api.dependencies import credentials_ok, get_profile_manager
+from phasmid_profile_manager.api.routes.viewer import _api_key_from_protocols, _origin_allowed
+from phasmid_profile_manager.core import auth, download_watch
 
 router = APIRouter()
 

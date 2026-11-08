@@ -4,11 +4,11 @@ import httpx
 import pytest
 from httpx import ASGITransport
 
-from phasmid_pm.api import dependencies
-from phasmid_pm.core.database import StorageManager
-from phasmid_pm.core.profile_manager import ProfileManager
-from phasmid_pm.core.scheduler import TaskScheduler
-from phasmid_pm.main import app
+from phasmid_profile_manager.api import dependencies
+from phasmid_profile_manager.core.database import StorageManager
+from phasmid_profile_manager.core.profile_manager import ProfileManager
+from phasmid_profile_manager.core.scheduler import TaskScheduler
+from phasmid_profile_manager.main import app
 
 
 @pytest.fixture
@@ -21,8 +21,8 @@ async def client(tmp_path, phasmid):
 
     dependencies.set_storage_manager(storage)
     dependencies.set_profile_manager(manager)
-    from phasmid_pm.api.routes.recovery import set_backup_manager
-    from phasmid_pm.core.backups import ProfileBackupManager
+    from phasmid_profile_manager.api.routes.recovery import set_backup_manager
+    from phasmid_profile_manager.core.backups import ProfileBackupManager
 
     set_backup_manager(ProfileBackupManager(manager))
     # Not started: the routes only need it to plan and to run-now; the loop

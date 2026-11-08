@@ -65,6 +65,20 @@ Status: pre-release. Linux x64 only, because Phasmid ships Linux x64 builds only
 
 ## Install and run
 
+### From PyPI
+
+Requirements: Linux x64 and [uv](https://docs.astral.sh/uv/) (or pipx).
+
+```bash
+uv tool install phasmid-profile-manager   # or: pipx install phasmid-profile-manager
+phasmid-profile-manager                   # http://localhost:8000, opens a browser tab
+```
+
+This puts `phasmid-profile-manager` (and its short alias `phasmid-pm`) on your
+`PATH`, in `~/.local/bin`. Inside any environment where the package is
+installed, `python -m phasmid_profile_manager` runs the same command, and
+`phasmid-profile-manager serve` is the same as giving no subcommand.
+
 ### From source
 
 Requirements: Linux x64, [uv](https://docs.astral.sh/uv/) (it provides Python
@@ -114,7 +128,7 @@ database and the profiles.
 ```bash
 uv sync --extra desktop
 uv run python scripts/build_webui.py
-uv run python -m phasmid_pm.desktop
+uv run python -m phasmid_profile_manager.desktop
 ```
 
 This opens the UI in a native window (pywebview) on a free loopback port, and
@@ -261,7 +275,7 @@ holds their lease.
 ## Architecture
 
 ```
-src/phasmid_pm/
+src/phasmid_profile_manager/
 ├── main.py             FastAPI app; serves the API and the bundled UI
 ├── cli.py              the phasmid-pm command, including accounts and leases
 ├── desktop.py          the native-window launcher
@@ -298,7 +312,7 @@ Frontend: Next.js 16, React 19, TypeScript, Tailwind v4.
 ```bash
 uv sync --extra dev
 uv run ruff check src tests
-uv run mypy src/phasmid_pm
+uv run mypy src/phasmid_profile_manager
 uv run pytest -m "not browser"    # fast suite, no browser
 PPM_PHASMID_BINARY=/path/to/chrome PPM_PHASMID_SOURCE=/path/to/phasmid \
     uv run pytest -m browser --no-network   # real Phasmid launches

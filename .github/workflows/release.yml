@@ -21,14 +21,22 @@ jobs:
       - uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
-      - name: Install dependencies
-        run: uv sync
+      # The build script needs only the standard library, so no `uv sync`.
       - name: Build the web UI into the package
-        run: uv run python scripts/build_webui.py
+        run: python3 scripts/build_webui.py
       - name: Build wheel (from source, includes the bundled UI) and sdist
         run: |
           uv build --wheel
           uv build --sdist
+      # Installs the wheel the way a user would, from PyPI dependencies only.
+      - name: Smoke test the wheel in a clean environment
+        run: |
+          uv venv --python 3.12 /tmp/wheel-env
+          uv pip install --python /tmp/wheel-env dist/*.whl
+          /tmp/wheel-env/bin/phasmid-profile-manager --help
+          /tmp/wheel-env/bin/phasmid-pm --help
+          /tmp/wheel-env/bin/python -m phasmid_profile_manager --help
+          test -f "$(/tmp/wheel-env/bin/python -c 'import phasmid_profile_manager, pathlib; print(pathlib.Path(phasmid_profile_manager.__file__).parent / "webui" / "index.html")')"
       - name: Checksum Python distributions
         working-directory: dist
         run: |
@@ -51,20 +59,3 @@ jobs:
           path: |
             dist/*.whl
             dist/*.tar.gz
-
-  publish-pypi:
-    name: Publish to PyPI (opt-in)
-    needs: build
-    runs-on: ubuntu-latest
-    # Enable by setting the repository variable PUBLISH_TO_PYPI=true and
-    # configuring a Trusted Publisher on PyPI. See docs/releasing.md.
-    if: vars.PUBLISH_TO_PYPI == 'true' && !contains(github.ref_name, '-')
-    environment: pypi
-    permissions:
-      id-token: write # OIDC for PyPI Trusted Publishing
-    steps:
-      - uses: actions/download-artifact@v8
-        with:
-          name: dist
-          path: dist
-      - uses: pypa/gh-action-pypi-publish@release/v1

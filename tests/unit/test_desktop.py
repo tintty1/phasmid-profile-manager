@@ -9,8 +9,8 @@ from urllib.parse import urlparse
 
 import pytest
 
-from phasmid_pm import desktop
-from phasmid_pm.config import get_settings
+from phasmid_profile_manager import desktop
+from phasmid_profile_manager.config import get_settings
 
 
 @pytest.fixture

@@ -8,7 +8,7 @@ import shutil
 
 import pytest
 
-from phasmid_pm.core.cleanup import ProfileCleanupManager
+from phasmid_profile_manager.core.cleanup import ProfileCleanupManager
 
 
 @pytest.fixture

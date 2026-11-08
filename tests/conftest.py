@@ -6,10 +6,10 @@ from dataclasses import dataclass, field
 
 import pytest
 
-from phasmid_pm.core import browser_install, machine, proxy_check
-from phasmid_pm.core.browser_install import Installation
-from phasmid_pm.core.database import StorageManager
-from phasmid_pm.core.profile_manager import ProfileManager
+from phasmid_profile_manager.core import browser_install, machine, proxy_check
+from phasmid_profile_manager.core.browser_install import Installation
+from phasmid_profile_manager.core.database import StorageManager
+from phasmid_profile_manager.core.profile_manager import ProfileManager
 from tests.fakes import FakeGenprofile, write_fake_chrome
 
 
@@ -129,7 +129,7 @@ def phasmid(tmp_path, monkeypatch, request) -> FakePhasmid:
 
     def require_installation() -> Installation:
         if not fake.installed:
-            from phasmid_pm.core.browser_session import BrowserLaunchError
+            from phasmid_profile_manager.core.browser_session import BrowserLaunchError
 
             raise BrowserLaunchError("The browser needs setup.")
         return fake.installation

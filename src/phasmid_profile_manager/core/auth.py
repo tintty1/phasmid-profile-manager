@@ -14,7 +14,7 @@ from datetime import datetime, timedelta
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError
 
-from phasmid_pm.config import get_settings
+from phasmid_profile_manager.config import get_settings
 
 SESSION_COOKIE = "cpm_session"
 

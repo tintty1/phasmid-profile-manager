@@ -9,10 +9,10 @@ The three configuration states, each of which must stay coherent:
 
 import pytest
 
-from phasmid_pm.api import dependencies
-from phasmid_pm.api.routes import auth as auth_routes
-from phasmid_pm.config import get_settings
-from phasmid_pm.core import auth
+from phasmid_profile_manager.api import dependencies
+from phasmid_profile_manager.api.routes import auth as auth_routes
+from phasmid_profile_manager.config import get_settings
+from phasmid_profile_manager.core import auth
 
 PASSWORD = "a-decent-password"
 

@@ -5,10 +5,14 @@ import json
 
 import pytest
 
-from phasmid_pm.api.routes.viewer import _api_key_from_protocols
-from phasmid_pm.core import browser_session as bs
-from phasmid_pm.core.browser_session import BrowserLaunchError, BrowserSessionManager, LaunchPlan
-from phasmid_pm.core.vnc import DEFAULT_GEOMETRY, display_geometry
+from phasmid_profile_manager.api.routes.viewer import _api_key_from_protocols
+from phasmid_profile_manager.core import browser_session as bs
+from phasmid_profile_manager.core.browser_session import (
+    BrowserLaunchError,
+    BrowserSessionManager,
+    LaunchPlan,
+)
+from phasmid_profile_manager.core.vnc import DEFAULT_GEOMETRY, display_geometry
 from tests.fakes import write_fake_chrome
 
 

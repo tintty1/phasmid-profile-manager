@@ -5,7 +5,7 @@ import os
 
 import pytest
 
-from phasmid_pm.core import downloads
+from phasmid_profile_manager.core import downloads
 
 
 def test_the_preference_points_at_the_folder_and_keeps_the_rest(tmp_path):

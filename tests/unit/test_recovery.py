@@ -7,14 +7,14 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from phasmid_pm.core import profile_archive
-from phasmid_pm.core.backups import ProfileBackupManager
-from phasmid_pm.core.cleanup import ProfileCleanupManager
-from phasmid_pm.core.database import StorageManager
-from phasmid_pm.core.leases import ProfileLocked
-from phasmid_pm.core.models import Schedule, ScheduleAction, ScheduleKind
-from phasmid_pm.core.profile_operations import profile_operation
-from phasmid_pm.core.scheduler import TaskScheduler
+from phasmid_profile_manager.core import profile_archive
+from phasmid_profile_manager.core.backups import ProfileBackupManager
+from phasmid_profile_manager.core.cleanup import ProfileCleanupManager
+from phasmid_profile_manager.core.database import StorageManager
+from phasmid_profile_manager.core.leases import ProfileLocked
+from phasmid_profile_manager.core.models import Schedule, ScheduleAction, ScheduleKind
+from phasmid_profile_manager.core.profile_operations import profile_operation
+from phasmid_profile_manager.core.scheduler import TaskScheduler
 
 
 async def seeded(manager):
@@ -246,7 +246,7 @@ async def test_backup_refuses_unreadable_credentials_and_keeps_previous_checkpoi
 ):
     from cryptography.fernet import Fernet
 
-    from phasmid_pm.config import get_settings
+    from phasmid_profile_manager.config import get_settings
 
     monkeypatch.setenv("PPM_SECRET_KEY", Fernet.generate_key().decode())
     get_settings.cache_clear()

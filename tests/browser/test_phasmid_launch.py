@@ -9,10 +9,10 @@ import asyncio
 import pytest
 from playwright.async_api import async_playwright
 
-from phasmid_pm.config import get_settings
-from phasmid_pm.core import browser_install, proxy_check
-from phasmid_pm.core.database import StorageManager
-from phasmid_pm.core.profile_manager import ProfileManager
+from phasmid_profile_manager.config import get_settings
+from phasmid_profile_manager.core import browser_install, proxy_check
+from phasmid_profile_manager.core.database import StorageManager
+from phasmid_profile_manager.core.profile_manager import ProfileManager
 from tests.browser.support import timezone_a_page_sees
 
 pytestmark = [pytest.mark.browser, pytest.mark.asyncio]
@@ -145,7 +145,7 @@ def attachment_site():
 
 
 async def test_downloads_land_in_the_profiles_folder(manager, attachment_site):
-    from phasmid_pm.core import downloads
+    from phasmid_profile_manager.core import downloads
 
     profile = await manager.create_profile("downloader")
     result = await manager.launch_browser(profile.id, mode="headless")

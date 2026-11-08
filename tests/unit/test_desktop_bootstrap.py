@@ -6,7 +6,7 @@ import stat
 import pytest
 from cryptography.fernet import Fernet
 
-from phasmid_pm import config
+from phasmid_profile_manager import config
 
 REAL_DESKTOP_DATA_DIR = config.desktop_data_dir
 

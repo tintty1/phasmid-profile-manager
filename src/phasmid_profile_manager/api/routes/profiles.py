@@ -17,9 +17,9 @@ from loguru import logger
 from pydantic import ValidationError
 from starlette.background import BackgroundTask
 
-from phasmid_pm.api.dependencies import get_profile_manager
-from phasmid_pm.api.errors import ApiError, validation_message
-from phasmid_pm.api.models.profiles import (
+from phasmid_profile_manager.api.dependencies import get_profile_manager
+from phasmid_profile_manager.api.errors import ApiError, validation_message
+from phasmid_profile_manager.api.models.profiles import (
     ActiveBrowsersResponse,
     BrowserCloseResponse,
     BrowserModesResponse,
@@ -40,15 +40,15 @@ from phasmid_pm.api.models.profiles import (
     ProxyCheckResponse,
     ReconcileOsRequest,
 )
-from phasmid_pm.api.models.system import ApiResponse, ExcelImportData
-from phasmid_pm.core import download_watch, downloads, proxy_check
-from phasmid_pm.core.browser_session import available_modes
-from phasmid_pm.core.database import StaleWriteError
-from phasmid_pm.core.excel_manager import ExcelManager
-from phasmid_pm.core.leases import ProfileLocked
-from phasmid_pm.core.machine import MachineError
-from phasmid_pm.core.models import BrowserSettings, ProfileStatus, ProxyConfig
-from phasmid_pm.core.profile_operations import ProfileProtected
+from phasmid_profile_manager.api.models.system import ApiResponse, ExcelImportData
+from phasmid_profile_manager.core import download_watch, downloads, proxy_check
+from phasmid_profile_manager.core.browser_session import available_modes
+from phasmid_profile_manager.core.database import StaleWriteError
+from phasmid_profile_manager.core.excel_manager import ExcelManager
+from phasmid_profile_manager.core.leases import ProfileLocked
+from phasmid_profile_manager.core.machine import MachineError
+from phasmid_profile_manager.core.models import BrowserSettings, ProfileStatus, ProxyConfig
+from phasmid_profile_manager.core.profile_operations import ProfileProtected
 
 router = APIRouter()
 

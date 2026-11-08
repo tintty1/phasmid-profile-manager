@@ -37,7 +37,7 @@ Please make sure the following pass before opening a pull request:
 # Backend
 uv run ruff check src tests            # lint
 uv run ruff format --check src tests   # formatting
-uv run mypy src/phasmid_pm             # type-check
+uv run mypy src/phasmid_profile_manager             # type-check
 uv run pytest -m "not browser"         # fast tests, no browser
 
 # Opt-in: real Phasmid launches
@@ -109,7 +109,7 @@ the process.
 
 ## Project layout
 
-- `src/phasmid_pm/`: the Python package (core logic, REST API, CDP and VNC
+- `src/phasmid_profile_manager/`: the Python package (core logic, REST API, CDP and VNC
   relays).
 - `web/`: the Next.js web interface.
 - `tests/`: unit, integration, and opt-in browser tests.

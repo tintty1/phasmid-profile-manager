@@ -3,11 +3,11 @@
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from phasmid_pm.api.dependencies import get_profile_manager
-from phasmid_pm.api.models.profiles import ProfileResponse
-from phasmid_pm.api.models.recovery import BackupListData, BackupRunData, TrashListData
-from phasmid_pm.api.models.system import ApiResponse
-from phasmid_pm.core.backups import ProfileBackupManager
+from phasmid_profile_manager.api.dependencies import get_profile_manager
+from phasmid_profile_manager.api.models.profiles import ProfileResponse
+from phasmid_profile_manager.api.models.recovery import BackupListData, BackupRunData, TrashListData
+from phasmid_profile_manager.api.models.system import ApiResponse
+from phasmid_profile_manager.core.backups import ProfileBackupManager
 
 router = APIRouter()
 _backup_manager: ProfileBackupManager | None = None

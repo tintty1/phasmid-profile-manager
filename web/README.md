@@ -25,7 +25,7 @@ To produce the bundle the Python package ships:
 python ../scripts/build_webui.py
 ```
 
-That runs the static export and copies `out/` into `src/phasmid_pm/webui/`.
+That runs the static export and copies `out/` into `src/phasmid_profile_manager/webui/`.
 
 ## Structure
 

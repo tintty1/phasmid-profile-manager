@@ -7,13 +7,13 @@ from unittest.mock import AsyncMock, Mock
 import httpx
 import pytest
 
-from phasmid_pm.api.dependencies import get_profile_manager
-from phasmid_pm.api.routes import recovery, runtime
-from phasmid_pm.config import get_settings
-from phasmid_pm.core.backups import ProfileBackupManager
-from phasmid_pm.core.browser_install import BrowserStatus
-from phasmid_pm.core.updates import RELEASES, UpdateStatus
-from phasmid_pm.main import app
+from phasmid_profile_manager.api.dependencies import get_profile_manager
+from phasmid_profile_manager.api.routes import recovery, runtime
+from phasmid_profile_manager.config import get_settings
+from phasmid_profile_manager.core.backups import ProfileBackupManager
+from phasmid_profile_manager.core.browser_install import BrowserStatus
+from phasmid_profile_manager.core.updates import RELEASES, UpdateStatus
+from phasmid_profile_manager.main import app
 
 
 @pytest.fixture(autouse=True)

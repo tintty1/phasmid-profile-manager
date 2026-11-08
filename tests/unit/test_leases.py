@@ -10,10 +10,10 @@ import asyncio
 
 import pytest
 
-from phasmid_pm.config import Settings
-from phasmid_pm.core.database import StorageManager
-from phasmid_pm.core.leases import ProfileLocked, lease_expired, make_lease_holder
-from phasmid_pm.core.models import BrowserSettings, Profile
+from phasmid_profile_manager.config import Settings
+from phasmid_profile_manager.core.database import StorageManager
+from phasmid_profile_manager.core.leases import ProfileLocked, lease_expired, make_lease_holder
+from phasmid_profile_manager.core.models import BrowserSettings, Profile
 
 OTHER = "other-host:999:c0ffee"
 TTL = 120

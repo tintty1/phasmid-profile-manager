@@ -6,9 +6,9 @@ compare() is pure, so every rule is tested here without a proxy or a network.
 import httpx
 import pytest
 
-from phasmid_pm.core import proxy_check
-from phasmid_pm.core.models import BrowserSettings, ProxyConfig, ProxyType
-from phasmid_pm.core.proxy_check import ProxyLocation, compare, preflight, proxy_url
+from phasmid_profile_manager.core import proxy_check
+from phasmid_profile_manager.core.models import BrowserSettings, ProxyConfig, ProxyType
+from phasmid_profile_manager.core.proxy_check import ProxyLocation, compare, preflight, proxy_url
 from tests.fakes import fake_pin
 
 TOKYO = ProxyLocation(

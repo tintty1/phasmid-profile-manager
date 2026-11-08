@@ -76,7 +76,7 @@ def run_desktop(
             "Desktop mode needs pywebview. From source, run: uv sync --extra desktop"
         ) from exc
 
-    from phasmid_pm.config import bootstrap_desktop, get_settings
+    from phasmid_profile_manager.config import bootstrap_desktop, get_settings
 
     bootstrap_desktop()
     settings = get_settings()
@@ -101,8 +101,8 @@ def run_desktop(
             os.environ["PPM_HOST"] = host
             os.environ["PPM_PORT"] = str(actual_port)
             get_settings.cache_clear()
-            from phasmid_pm.api.routes.automation import WS_MAX_SIZE
-            from phasmid_pm.main import app
+            from phasmid_profile_manager.api.routes.automation import WS_MAX_SIZE
+            from phasmid_profile_manager.main import app
 
             server = uvicorn.Server(
                 uvicorn.Config(
@@ -155,7 +155,7 @@ def _show_error(message: str) -> None:
 def main() -> None:
     """Double-click entry point; ordinary ``phasmid-pm`` keeps its CLI behavior."""
     try:
-        from phasmid_pm.config import bootstrap_desktop, get_settings
+        from phasmid_profile_manager.config import bootstrap_desktop, get_settings
 
         bootstrap_desktop()
         # PyInstaller windowed apps have no stdout/stderr. Keep logs writable

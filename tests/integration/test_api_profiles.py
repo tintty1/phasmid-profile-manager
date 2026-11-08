@@ -4,8 +4,8 @@ from datetime import datetime
 
 import pytest
 
-from phasmid_pm.api.dependencies import get_profile_manager
-from phasmid_pm.core.models import UsageStats
+from phasmid_profile_manager.api.dependencies import get_profile_manager
+from phasmid_profile_manager.core.models import UsageStats
 from tests.fakes import fake_pin
 
 
@@ -267,7 +267,7 @@ async def test_a_profile_round_trips_through_an_archive(client):
 @pytest.mark.asyncio
 async def test_importing_a_pinned_profile_keeps_the_machine(client):
     """The point of the archive: the same identity comes back."""
-    from phasmid_pm.api.dependencies import get_profile_manager
+    from phasmid_profile_manager.api.dependencies import get_profile_manager
 
     created = await client.post("/api/profiles", json={"name": "pinned-export"})
     manager = get_profile_manager()
@@ -317,8 +317,8 @@ async def test_exporting_an_unknown_profile_is_a_404(client):
 @pytest.mark.asyncio
 async def test_a_refused_import_leaves_nothing_behind(client, monkeypatch):
     """A rejected archive must not strand a profile directory nobody can see."""
-    from phasmid_pm.api.dependencies import get_profile_manager
-    from phasmid_pm.core import profile_archive
+    from phasmid_profile_manager.api.dependencies import get_profile_manager
+    from phasmid_profile_manager.core import profile_archive
 
     manager = get_profile_manager()
     profiles_dir = manager.profiles_dir
@@ -349,7 +349,7 @@ WINDOWS_PIN = fake_pin("windows", seed="12" * 16, public_ip="203.0.113.10")
 
 async def _pinned_windows_profile_set_to(client, os_name: str) -> str:
     """A profile whose pin says Windows while its setting says something else."""
-    from phasmid_pm.api.dependencies import get_profile_manager
+    from phasmid_profile_manager.api.dependencies import get_profile_manager
 
     created = await client.post("/api/profiles", json={"name": f"drifted-{os_name}"})
     profile_id = created.json()["id"]
@@ -379,7 +379,7 @@ async def test_a_setting_that_disagrees_with_the_pin_is_reported(client):
 @pytest.mark.asyncio
 async def test_keeping_the_machine_moves_the_setting_and_nothing_else(client):
     """The cheap way out: the profile is the computer it has always been."""
-    from phasmid_pm.api.dependencies import get_profile_manager
+    from phasmid_profile_manager.api.dependencies import get_profile_manager
 
     profile_id = await _pinned_windows_profile_set_to(client, "linux")
 
@@ -398,7 +398,7 @@ async def test_keeping_the_machine_moves_the_setting_and_nothing_else(client):
 @pytest.mark.asyncio
 async def test_keeping_the_setting_pins_a_machine_for_it(client, phasmid):
     """The expensive way out: new hardware, generated for the OS that was chosen."""
-    from phasmid_pm.api.dependencies import get_profile_manager
+    from phasmid_profile_manager.api.dependencies import get_profile_manager
 
     profile_id = await _pinned_windows_profile_set_to(client, "linux")
 
@@ -445,7 +445,7 @@ async def test_reconciling_needs_a_pin_and_a_profile(client, phasmid):
 @pytest.mark.asyncio
 async def test_clear_geography_hands_the_location_back_to_the_proxy(client, phasmid):
     """A stated zone can be dropped; the next launch then moves to the exit."""
-    from phasmid_pm.api.dependencies import get_profile_manager
+    from phasmid_profile_manager.api.dependencies import get_profile_manager
 
     old = await client.post(
         "/api/profiles",

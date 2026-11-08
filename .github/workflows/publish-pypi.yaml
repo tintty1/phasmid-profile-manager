@@ -1,0 +1,48 @@
+name: Publish Package to PyPI
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  pypi-publish:
+    name: Upload to PyPI
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      # The build script needs only the standard library, so no `uv sync`.
+      - name: Build the web UI into the package
+        run: python3 scripts/build_webui.py
+
+      # Built separately: `uv build` makes the wheel from the sdist, which
+      # leaves out the (generated, git-ignored) web UI.
+      - name: Build
+        run: |
+          uv build --wheel
+          uv build --sdist
+
+      # Installs the wheel the way a user would, from PyPI dependencies only.
+      - name: Smoke test the wheel in a clean environment
+        run: |
+          uv venv --python 3.12 /tmp/wheel-env
+          uv pip install --python /tmp/wheel-env dist/*.whl
+          /tmp/wheel-env/bin/phasmid-profile-manager --help
+          /tmp/wheel-env/bin/phasmid-pm --help
+          /tmp/wheel-env/bin/python -m phasmid_profile_manager --help
+          test -f "$(/tmp/wheel-env/bin/python -c 'import phasmid_profile_manager, pathlib; print(pathlib.Path(phasmid_profile_manager.__file__).parent / "webui" / "index.html")')"
+
+      - name: Publish to PyPI
+        run: uv publish -v dist/*

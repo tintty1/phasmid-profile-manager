@@ -9,7 +9,7 @@ of the upstream project, camoufox-profile-manager, is in its own repository.
   only on Linux x64 hosts. Profiles may claim Linux or Windows; Phasmid does not
   support macOS profiles.
 - **No packaged app.** The desktop window runs from source
-  (`python -m phasmid_pm.desktop`) and needs a pywebview backend installed by
+  (`python -m phasmid_profile_manager.desktop`) and needs a pywebview backend installed by
   hand. There are no published wheels, PyPI package or Docker image yet.
 - **Windows profiles need a Windows font store** on the host, which Phasmid does
   not ship and the user has to supply. The manager neither helps set one up nor

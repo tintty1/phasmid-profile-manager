@@ -2,8 +2,8 @@
 
 from cryptography.fernet import Fernet
 
-from phasmid_pm.config import get_settings
-from phasmid_pm.core import crypto
+from phasmid_profile_manager.config import get_settings
+from phasmid_profile_manager.core import crypto
 
 
 def test_roundtrip_with_key(monkeypatch):

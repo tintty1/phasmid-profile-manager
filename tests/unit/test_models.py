@@ -2,7 +2,7 @@
 
 import pytest
 
-from phasmid_pm.core.models import BrowserSettings, generate_short_id
+from phasmid_profile_manager.core.models import BrowserSettings, generate_short_id
 
 
 def test_short_id_shape_and_uniqueness():

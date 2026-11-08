@@ -3,8 +3,8 @@
 import os
 import time
 
-from phasmid_pm.core import download_watch
-from phasmid_pm.core.download_watch import DownloadRegistry, safe_name, unique_path
+from phasmid_profile_manager.core import download_watch
+from phasmid_profile_manager.core.download_watch import DownloadRegistry, safe_name, unique_path
 
 
 def test_a_taken_name_gets_a_number_like_chrome_gives_it(tmp_path):

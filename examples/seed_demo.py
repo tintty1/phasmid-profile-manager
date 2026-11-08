@@ -11,9 +11,9 @@ can explore the API and web interface with realistic data.
 
 import asyncio
 
-from phasmid_pm.core.database import StorageManager
-from phasmid_pm.core.models import ProxyConfig, ProxyType
-from phasmid_pm.core.profile_manager import ProfileManager
+from phasmid_profile_manager.core.database import StorageManager
+from phasmid_profile_manager.core.models import ProxyConfig, ProxyType
+from phasmid_profile_manager.core.profile_manager import ProfileManager
 
 # Location follows each profile's exit address at launch; these differ in the
 # machine (OS) and in a stated language list.

@@ -8,7 +8,7 @@ tolerates plaintext values written before a key was configured, easing migration
 from cryptography.fernet import Fernet, InvalidToken
 from loguru import logger
 
-from phasmid_pm.config import get_settings
+from phasmid_profile_manager.config import get_settings
 
 _PREFIX = "enc:"
 

@@ -21,9 +21,9 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from phasmid_pm.core.database import StaleWriteError
-from phasmid_pm.core.leases import ProfileLocked
-from phasmid_pm.core.profile_operations import ProfileProtected
+from phasmid_profile_manager.core.database import StaleWriteError
+from phasmid_profile_manager.core.leases import ProfileLocked
+from phasmid_profile_manager.core.profile_operations import ProfileProtected
 
 # Codes are keyed by status so a plain HTTPException still yields a stable,
 # machine-readable code without every raise site naming one.

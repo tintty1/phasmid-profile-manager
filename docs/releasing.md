@@ -9,12 +9,14 @@ A `v*` tag triggers `.github/workflows/release.yml`, which:
 1. builds the web UI into the package (`scripts/build_webui.py`);
 2. builds the wheel (`uv build --wheel`, which includes the bundled UI) and the
    sdist (`uv build --sdist`, source only);
-3. writes a `.sha256` beside each;
-4. attaches all of them to a **draft** GitHub Release with generated notes,
-   marked as a pre-release when the tag contains `-`, and never as Latest;
-5. optionally publishes to PyPI (below).
+3. smoke-tests the wheel in a clean environment;
+4. writes a `.sha256` beside each;
+5. attaches all of them to a **draft** GitHub Release with generated notes,
+   marked as a pre-release when the tag contains `-`, and never as Latest.
 
-A maintainer publishes the draft after checking it.
+A maintainer publishes the draft after checking it. Publishing it triggers
+`.github/workflows/publish-pypi.yaml`, which builds the package again (with the
+web UI), smoke-tests the wheel and uploads it to PyPI.
 
 ## Before tagging
 
@@ -45,10 +47,10 @@ Settings checks this project's GitHub repository for its latest stable release
 backs up every profile first and then links to the release. The app does not
 download or install the update, verify signatures, or replace itself.
 
-## Publishing to PyPI (optional)
+## Publishing to PyPI
 
-PyPI publishing is off by default. Set the repository variable
-`PUBLISH_TO_PYPI=true`, create a GitHub environment named `pypi`, and configure
-a PyPI Trusted Publisher for this repository, workflow `release.yml` and
-environment `pypi`. The workflow uses OIDC, not an API token, and skips
-pre-release tags.
+`publish-pypi.yaml` runs when a GitHub Release is published (or by hand from the
+Actions tab) and uploads `phasmid-profile-manager` to PyPI. It uses OIDC, not an
+API token, so once, before the first release, add a (pending) Trusted Publisher
+on PyPI for owner `tintty1`, repository `phasmid-profile-manager` and workflow
+`publish-pypi.yaml`, with no environment.

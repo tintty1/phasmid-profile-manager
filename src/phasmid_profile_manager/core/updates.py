@@ -6,7 +6,7 @@ import httpx
 from packaging.version import Version
 from pydantic import BaseModel, Field
 
-from phasmid_pm import __version__
+from phasmid_profile_manager import __version__
 
 REPOSITORY = "tintty1/phasmid-profile-manager"
 RELEASES = f"https://github.com/{REPOSITORY}/releases"

@@ -8,7 +8,7 @@ import socket
 
 import pytest
 
-from phasmid_pm.core import proxy_check
+from phasmid_profile_manager.core import proxy_check
 
 
 def _type_names(error: BaseException):

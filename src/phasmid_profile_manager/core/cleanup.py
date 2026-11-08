@@ -12,8 +12,8 @@ from typing import Any
 
 from loguru import logger
 
-from phasmid_pm.core.database import StorageManager
-from phasmid_pm.core.models import Profile
+from phasmid_profile_manager.core.database import StorageManager
+from phasmid_profile_manager.core.models import Profile
 
 
 class ProfileCleanupManager:

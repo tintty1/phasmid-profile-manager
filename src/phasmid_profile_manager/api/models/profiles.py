@@ -6,8 +6,8 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
-from phasmid_pm.core.models import Profile, ProfileStatus, ProxyCheckRecord
-from phasmid_pm.core.proxy_check import Level, ProxyCheckResult
+from phasmid_profile_manager.core.models import Profile, ProfileStatus, ProxyCheckRecord
+from phasmid_profile_manager.core.proxy_check import Level, ProxyCheckResult
 
 
 class ProfileCreateRequest(BaseModel):
@@ -139,7 +139,7 @@ class ProfileResponse(BaseModel):
     @classmethod
     def from_profile(cls, profile: "Profile") -> "ProfileResponse":
         """Build the API view of a profile."""
-        from phasmid_pm.core import machine
+        from phasmid_profile_manager.core import machine
 
         return cls(
             id=profile.id,

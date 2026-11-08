@@ -3,9 +3,9 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from phasmid_pm.api.models.system import ApiResponse
-from phasmid_pm.core.browser_install import BrowserStatus, browser_installer
-from phasmid_pm.core.updates import UpdateStatus, check_update
+from phasmid_profile_manager.api.models.system import ApiResponse
+from phasmid_profile_manager.core.browser_install import BrowserStatus, browser_installer
+from phasmid_profile_manager.core.updates import UpdateStatus, check_update
 
 router = APIRouter()
 
@@ -33,7 +33,7 @@ class UpdatePreparation(BaseModel):
 
 @router.post("/system/updates/prepare", response_model=ApiResponse[UpdatePreparation])
 async def prepare_update():
-    from phasmid_pm.api.routes.recovery import get_backup_manager
+    from phasmid_profile_manager.api.routes.recovery import get_backup_manager
 
     update = await check_update()
     if update.error:

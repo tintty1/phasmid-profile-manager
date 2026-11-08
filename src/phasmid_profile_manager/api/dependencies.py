@@ -4,11 +4,11 @@ import hmac
 
 from fastapi import Header, HTTPException, Request
 
-from phasmid_pm.config import get_settings
-from phasmid_pm.core import auth
-from phasmid_pm.core.database import StorageManager
-from phasmid_pm.core.profile_manager import ProfileManager
-from phasmid_pm.core.scheduler import TaskScheduler
+from phasmid_profile_manager.config import get_settings
+from phasmid_profile_manager.core import auth
+from phasmid_profile_manager.core.database import StorageManager
+from phasmid_profile_manager.core.profile_manager import ProfileManager
+from phasmid_profile_manager.core.scheduler import TaskScheduler
 
 _storage_manager: StorageManager | None = None
 _profile_manager: ProfileManager | None = None

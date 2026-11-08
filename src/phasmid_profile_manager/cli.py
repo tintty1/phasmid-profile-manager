@@ -1,7 +1,8 @@
 """Command-line launcher: run the API + bundled web UI as one process.
 
-Installed as the ``phasmid-pm`` console script. Starts the server and opens the
-web UI in the default browser. The ``user`` subcommands manage login accounts —
+Installed as the ``phasmid-profile-manager`` console script and its short alias
+``phasmid-pm``; ``python -m phasmid_profile_manager`` runs the same thing.
+Starts the server and opens the web UI in the default browser. The ``user`` subcommands manage login accounts —
 they exist on the CLI, not the API, so the first user can be created without a
 chicken-and-egg lockout and creating accounts requires shell access to the host.
 """
@@ -17,31 +18,30 @@ from typing import NoReturn
 
 import uvicorn
 
-from phasmid_pm.config import get_settings
-from phasmid_pm.core.database import StorageManager
-from phasmid_pm.core.leases import lease_expired
+from phasmid_profile_manager.config import get_settings
+from phasmid_profile_manager.core.database import StorageManager
+from phasmid_profile_manager.core.leases import lease_expired
 
 
 def main() -> None:
     if "--desktop" in sys.argv[1:]:
-        from phasmid_pm.config import bootstrap_desktop
+        from phasmid_profile_manager.config import bootstrap_desktop
 
         bootstrap_desktop()
     settings = get_settings()
     parser = argparse.ArgumentParser(
-        prog="phasmid-pm",
+        prog="phasmid-profile-manager",
         description="Run the Phasmid Profile Manager (API + web UI) on one port.",
     )
-    parser.add_argument("--host", default=settings.host, help="Bind address")
-    parser.add_argument("--port", type=int, default=settings.port, help="Port")
-    parser.add_argument("--no-browser", action="store_true", help="Do not open a browser")
-    parser.add_argument(
-        "--desktop",
-        action="store_true",
-        help="Open a native desktop window instead of a browser tab (needs the 'desktop' extra)",
-    )
+    _add_server_arguments(parser, settings.host, settings.port)
 
     subcommands = parser.add_subparsers(dest="command")
+    # `serve` is what running with no subcommand does, spelled out. Its flags
+    # default to SUPPRESS so `--port 9000 serve` keeps the port given before it.
+    serve = subcommands.add_parser(
+        "serve", help="Run the server (the default when no subcommand is given)"
+    )
+    _add_server_arguments(serve, argparse.SUPPRESS, argparse.SUPPRESS)
     user_parser = subcommands.add_parser(
         "user",
         help="Manage login accounts (creating the first one turns login on)",
@@ -117,7 +117,7 @@ def main() -> None:
     get_settings.cache_clear()
 
     if args.desktop:
-        from phasmid_pm.desktop import run_desktop
+        from phasmid_profile_manager.desktop import run_desktop
 
         run_desktop(host=args.host, port=args.port)
         return
@@ -128,10 +128,25 @@ def main() -> None:
 
     # Import the app object (not an import string) so this works inside a frozen
     # PyInstaller bundle where uvicorn cannot resolve the module by name.
-    from phasmid_pm.api.routes.automation import WS_MAX_SIZE
-    from phasmid_pm.main import app
+    from phasmid_profile_manager.api.routes.automation import WS_MAX_SIZE
+    from phasmid_profile_manager.main import app
 
     uvicorn.run(app, host=args.host, port=args.port, log_level="info", ws_max_size=WS_MAX_SIZE)
+
+
+def _add_server_arguments(parser: argparse.ArgumentParser, host: object, port: object) -> None:
+    flag_default = argparse.SUPPRESS if host is argparse.SUPPRESS else False
+    parser.add_argument("--host", default=host, help="Bind address")
+    parser.add_argument("--port", type=int, default=port, help="Port")
+    parser.add_argument(
+        "--no-browser", action="store_true", default=flag_default, help="Do not open a browser"
+    )
+    parser.add_argument(
+        "--desktop",
+        action="store_true",
+        default=flag_default,
+        help="Open a native desktop window instead of a browser tab (needs the 'desktop' extra)",
+    )
 
 
 def _fail(message: str) -> NoReturn:
@@ -141,7 +156,7 @@ def _fail(message: str) -> NoReturn:
 
 def _read_password(args: argparse.Namespace) -> str:
     """Collect a password without it ever appearing in argv or the environment."""
-    from phasmid_pm.core.auth import MIN_PASSWORD_LENGTH
+    from phasmid_profile_manager.core.auth import MIN_PASSWORD_LENGTH
 
     if args.password_stdin:
         password = sys.stdin.readline().rstrip("\n")
@@ -204,8 +219,8 @@ async def _run_leases_command() -> None:
 
 async def _run_user_command(args: argparse.Namespace) -> None:
     # Imported here so plain `phasmid-pm` startup does not pay for them.
-    from phasmid_pm.core import auth
-    from phasmid_pm.core.database import StorageManager
+    from phasmid_profile_manager.core import auth
+    from phasmid_profile_manager.core.database import StorageManager
 
     storage = StorageManager(get_settings().db_path)
     await storage.initialize()

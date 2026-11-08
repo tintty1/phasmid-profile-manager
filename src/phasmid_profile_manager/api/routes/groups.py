@@ -3,14 +3,14 @@
 from fastapi import APIRouter, HTTPException, status
 from loguru import logger
 
-from phasmid_pm.api.dependencies import get_profile_manager
-from phasmid_pm.api.models.groups import (
+from phasmid_profile_manager.api.dependencies import get_profile_manager
+from phasmid_profile_manager.api.models.groups import (
     GroupCreateRequest,
     GroupListResponse,
     GroupResponse,
     GroupUpdateRequest,
 )
-from phasmid_pm.api.models.system import ApiResponse
+from phasmid_profile_manager.api.models.system import ApiResponse
 
 router = APIRouter()
 

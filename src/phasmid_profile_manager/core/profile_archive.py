@@ -26,8 +26,8 @@ from typing import Any
 
 from loguru import logger
 
-from phasmid_pm import __version__
-from phasmid_pm.core.models import Profile
+from phasmid_profile_manager import __version__
+from phasmid_profile_manager.core.models import Profile
 
 FORMAT_VERSION = 1
 MANIFEST_NAME = "manifest.json"

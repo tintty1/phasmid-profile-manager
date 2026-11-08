@@ -74,10 +74,17 @@ WORKDIR /app
 # Install dependencies first (better layer caching).
 COPY pyproject.toml uv.lock README.md ./
 COPY src ./src
-RUN uv sync --no-dev --frozen
+# phasmid-profile-gen comes from the sibling checkout, which docker-compose.yml
+# passes as a named build context; the lock looks for it at ../phasmid-profile-gen.
+# Only what its build reads is copied. Without .git its version cannot be read
+# from tags, so it is stated.
+COPY --from=phasmid-profile-gen pyproject.toml README.md LICENSE /phasmid-profile-gen/
+COPY --from=phasmid-profile-gen src /phasmid-profile-gen/src
+ARG PROFILE_GEN_VERSION=0.1.1+local
+RUN UV_DYNAMIC_VERSIONING_BYPASS=$PROFILE_GEN_VERSION uv sync --no-dev --frozen
 
 # The static export, where the package looks for it when no PPM_WEBUI_DIR is set.
-COPY --from=webui /web/out ./src/phasmid_pm/webui
+COPY --from=webui /web/out ./src/phasmid_profile_manager/webui
 
 # Everything that persists lives in /data: the database, profile directories,
 # the installed Phasmid release, and phasmid-profile-gen's DB-IP cache.

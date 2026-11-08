@@ -10,11 +10,11 @@ from typing import NoReturn
 from fastapi import APIRouter, HTTPException, Request, Response
 from loguru import logger
 
-from phasmid_pm.api.dependencies import get_storage_manager
-from phasmid_pm.api.models.auth import AuthSessionResponse, LoginRequest
-from phasmid_pm.api.models.system import ApiResponse
-from phasmid_pm.config import get_settings
-from phasmid_pm.core import auth
+from phasmid_profile_manager.api.dependencies import get_storage_manager
+from phasmid_profile_manager.api.models.auth import AuthSessionResponse, LoginRequest
+from phasmid_profile_manager.api.models.system import ApiResponse
+from phasmid_profile_manager.config import get_settings
+from phasmid_profile_manager.core import auth
 
 router = APIRouter()
 

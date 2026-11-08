@@ -8,7 +8,7 @@ from typing import Any
 
 from loguru import logger
 
-from phasmid_pm.config import get_settings
+from phasmid_profile_manager.config import get_settings
 
 from . import browser_install, downloads, machine, profile_archive, proxy_check
 from .browser_session import BrowserLaunchError, BrowserSessionManager, reap_orphan

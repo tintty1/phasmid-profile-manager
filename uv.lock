@@ -990,9 +990,14 @@ wheels = [
 
 [[package]]
 name = "phasmid-profile-gen"
-source = { editable = "../phasmid-profile-gen" }
+version = "0.1.1"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "jsonschema" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/8f/06/a26b54fb8267a5aa5a239a66e26584c08a2a24d74f976468d5caa0bd14f3/phasmid_profile_gen-0.1.1.tar.gz", hash = "sha256:0c94d1d2d474e61bafd4e8c76ff8fd7c0d5082e1fc81666db6284ccc8fde0bc8", size = 111292 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/42/5a/1ccd543990d8b30a43d4758e1825d39e97a1701035b66102fc7597eeac88/phasmid_profile_gen-0.1.1-py3-none-any.whl", hash = "sha256:4dfcbb7f5d2c82330d5b587903d1bbc9584882414769135ab565208c778c5a8f", size = 57472 },
 ]
 
 [package.optional-dependencies]
@@ -1000,22 +1005,6 @@ location = [
     { name = "maxminddb" },
     { name = "timezonefinder" },
     { name = "timezonefinder-data" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "jsonschema", specifier = ">=4.23" },
-    { name = "maxminddb", marker = "extra == 'location'", specifier = "==3.2.0" },
-    { name = "timezonefinder", marker = "extra == 'location'", specifier = "==9.2.0" },
-    { name = "timezonefinder-data", marker = "extra == 'location'", specifier = "==4.2026.5" },
-]
-provides-extras = ["location"]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "pre-commit", specifier = ">=4.3.0" },
-    { name = "pytest", specifier = ">=8" },
-    { name = "ruff" },
 ]
 
 [[package]]
@@ -1067,7 +1056,7 @@ requires-dist = [
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.13" },
     { name = "openpyxl", specifier = ">=3.1" },
     { name = "packaging", specifier = ">=24.1" },
-    { name = "phasmid-profile-gen", extras = ["location"], editable = "../phasmid-profile-gen" },
+    { name = "phasmid-profile-gen", extras = ["location"], specifier = "==0.1.1" },
     { name = "playwright", marker = "extra == 'dev'", specifier = ">=1.60" },
     { name = "psutil", specifier = ">=6.1" },
     { name = "pydantic", specifier = ">=2.10" },

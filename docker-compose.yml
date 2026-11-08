@@ -10,12 +10,7 @@
 # PPM_API_KEY, and set PPM_SECRET_KEY to encrypt proxy passwords at rest.
 services:
   app:
-    build:
-      context: .
-      # The sibling phasmid-profile-gen checkout, which uv.lock installs from
-      # (pyproject.toml's [tool.uv.sources]).
-      additional_contexts:
-        phasmid-profile-gen: ../phasmid-profile-gen
+    build: .
     # environment:
     # PPM_API_KEY: "change-me"
     # PPM_SECRET_KEY: "generate-with-fernet"

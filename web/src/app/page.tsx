@@ -53,6 +53,7 @@ import {
   type Profile,
   type ProxyCheckRecord,
 } from '@/lib/api'
+import { copyText } from '@/lib/clipboard'
 
 const MODE_LABELS: Record<DisplayMode, { label: string; hint: string; icon: React.ReactNode }> = {
   headless: { label: 'Headless', hint: 'No window; for automation', icon: <EyeOff size={13} /> },
@@ -280,12 +281,8 @@ export default function ProfilesPage() {
     const url = cdpUrl(profile.id)
     const hint =
       'Connect with chromium.connect_over_cdp(url) in Playwright, or puppeteer.connect({ browserWSEndpoint: url }).'
-    try {
-      await navigator.clipboard.writeText(url)
-      toast('ok', 'CDP URL copied', hint)
-    } catch {
-      toast('info', 'CDP URL', url)
-    }
+    if (await copyText(url)) toast('ok', 'CDP URL copied', hint)
+    else toast('info', 'CDP URL', url)
   }
 
   function toggleSort(key: SortKey) {
@@ -1134,6 +1131,7 @@ export default function ProfilesPage() {
         <BrowserViewer
           profileId={viewing.id}
           profileName={viewing.name}
+          cdp={active.get(viewing.id)?.cdp ?? false}
           onClose={() => setViewing(null)}
           onStop={() => stop(viewing)}
         />

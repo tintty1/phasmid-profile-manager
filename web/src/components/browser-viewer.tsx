@@ -1,15 +1,18 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { Maximize2, Minimize2, Square, X } from 'lucide-react'
+import { Check, Maximize2, Minimize2, Square, Terminal, X } from 'lucide-react'
 
-import { getApiKey, vncUrl } from '@/lib/api'
+import { cdpUrl, getApiKey, vncUrl } from '@/lib/api'
+import { copyText } from '@/lib/clipboard'
 
 type Status = 'connecting' | 'connected' | 'disconnected'
 
 interface BrowserViewerProps {
   profileId: string
   profileName: string
+  /** Drivable over CDP; shows the button that copies its endpoint. */
+  cdp: boolean
   onClose: () => void
   onStop: () => void
 }
@@ -27,12 +30,14 @@ function keyProtocol(key: string): string {
  * Deliberately not a Modal: Modal closes on Escape, and Escape here belongs to
  * the page inside the browser.
  */
-export function BrowserViewer({ profileId, profileName, onClose, onStop }: BrowserViewerProps) {
+export function BrowserViewer({ profileId, profileName, cdp, onClose, onStop }: BrowserViewerProps) {
   const screenRef = useRef<HTMLDivElement>(null)
   const panelRef = useRef<HTMLDivElement>(null)
   const [status, setStatus] = useState<Status>('connecting')
   const [reason, setReason] = useState<string | null>(null)
   const [fullscreen, setFullscreen] = useState(false)
+  // Feedback lives on the button: a toast is hidden behind this panel in full screen.
+  const [copied, setCopied] = useState<'ok' | 'failed' | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -86,6 +91,16 @@ export function BrowserViewer({ profileId, profileName, onClose, onStop }: Brows
     return () => document.removeEventListener('fullscreenchange', onChange)
   }, [])
 
+  useEffect(() => {
+    if (copied !== 'ok') return
+    const timer = setTimeout(() => setCopied(null), 2000)
+    return () => clearTimeout(timer)
+  }, [copied])
+
+  async function copyCdp() {
+    setCopied((await copyText(cdpUrl(profileId))) ? 'ok' : 'failed')
+  }
+
   function toggleFullscreen() {
     if (document.fullscreenElement) void document.exitFullscreen()
     else void panelRef.current?.requestFullscreen()
@@ -104,6 +119,28 @@ export function BrowserViewer({ profileId, profileName, onClose, onStop }: Brows
         <span className="font-mono text-ink-faint">{profileId}</span>
         <StatusDot status={status} />
         <div className="ml-auto flex items-center gap-1">
+          {cdp && copied === 'failed' && (
+            // The clipboard refused: show the URL to copy by hand.
+            <input
+              className="field h-7 w-80 py-0 font-mono text-xs"
+              readOnly
+              value={cdpUrl(profileId)}
+              aria-label="CDP URL"
+              autoFocus
+              onFocus={(event) => event.currentTarget.select()}
+              onBlur={() => setCopied(null)}
+            />
+          )}
+          {cdp && copied !== 'failed' && (
+            <button
+              className="btn btn-ghost h-7"
+              onClick={copyCdp}
+              title="Copy the CDP WebSocket URL, for chromium.connect_over_cdp(url) or puppeteer.connect({ browserWSEndpoint: url })"
+            >
+              {copied === 'ok' ? <Check size={13} /> : <Terminal size={13} />}
+              <span aria-live="polite">{copied === 'ok' ? 'Copied' : 'Copy CDP URL'}</span>
+            </button>
+          )}
           <button
             className="btn btn-ghost h-7 w-7 p-0"
             onClick={toggleFullscreen}

@@ -43,6 +43,9 @@ class Settings(BaseSettings):
     # phasmid_source a Phasmid source tree (for tools/proxyroute).
     phasmid_repo: str = "tintty1/phasmid"
     phasmid_release: str | None = None
+    # Once a release is installed, check for a newer one on every start and
+    # install it for the profiles that do not pin a version.
+    phasmid_auto_update: bool = True
     phasmid_binary: str | None = None
     phasmid_source: str | None = None
     backup_interval_hours: int = Field(default=24, ge=1)

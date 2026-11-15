@@ -44,6 +44,11 @@ class ExcelManager:
                 "default, default_public_interface_only, default_public_and_private_interfaces "
                 "or disable_non_proxied_udp",
             ),
+            (
+                "phasmid_version",
+                "Phasmid version",
+                "Release tag, e.g. 155.0.8059.84-p1; empty for the newest installed",
+            ),
             ("proxy_type", "Proxy type", "http, https, socks4, socks5 or empty"),
             ("proxy_server", "Proxy server", "host:port or empty"),
             ("proxy_username", "Proxy username", "Username or empty"),
@@ -124,6 +129,7 @@ class ExcelManager:
             "languages": ", ".join(browser_settings.languages or []),
             "timezone": browser_settings.timezone or "",
             "webrtc_policy": browser_settings.webrtc_policy,
+            "phasmid_version": browser_settings.phasmid_version or "",
             "proxy_type": proxy.type.value
             if proxy and hasattr(proxy.type, "value")
             else (str(proxy.type) if proxy else ""),
@@ -294,6 +300,8 @@ class ExcelManager:
             values["timezone"] = row_data["timezone"]
         if row_data["webrtc_policy"]:
             values["webrtc_policy"] = row_data["webrtc_policy"]
+        if row_data["phasmid_version"]:
+            values["phasmid_version"] = row_data["phasmid_version"]
         return BrowserSettings(**values)
 
     def _create_proxy_config(self, row_data: dict[str, str]) -> dict[str, Any] | None:

@@ -13,6 +13,7 @@ import {
   OS_LABELS,
   profilesAPI,
   shortGpu,
+  systemAPI,
   type FingerprintSummary,
   type GpuChoice,
   type Group,
@@ -34,6 +35,8 @@ interface FormState {
   timezone: string
   languages: string
   webrtcPolicy: WebRTCPolicy
+  /** "" = the newest installed release, updated on start. */
+  phasmidVersion: string
   proxyType: string
   proxyServer: string
   proxyUsername: string
@@ -51,6 +54,7 @@ const EMPTY: FormState = {
   timezone: '',
   languages: '',
   webrtcPolicy: 'default',
+  phasmidVersion: '',
   proxyType: 'http',
   proxyServer: '',
   proxyUsername: '',
@@ -94,6 +98,7 @@ function fromProfile(profile: Profile): FormState {
     timezone: bs.timezone ?? '',
     languages: (bs.languages ?? []).join(', '),
     webrtcPolicy: bs.webrtc_policy ?? 'default',
+    phasmidVersion: bs.phasmid_version ?? '',
     proxyType: proxy.type ?? 'http',
     proxyServer: proxy.server ?? '',
     proxyUsername: proxy.username ?? '',
@@ -153,6 +158,8 @@ export function ProfileForm({ open, profile, groups, onClose, onSaved }: Props) 
   const [clearingGeography, setClearingGeography] = useState(false)
   // GPUs of phasmid-profile-gen's captured devices, per OS.
   const [gpus, setGpus] = useState<Record<string, GpuChoice[]>>({})
+  // Phasmid releases on disk, newest first, offered for the version pin.
+  const [versions, setVersions] = useState<string[]>([])
   // The version this form was filled from. Sent with the save so that an edit
   // somebody else made in the meantime is refused instead of being overwritten,
   // and moved on after a refused save so a deliberate second Save can proceed.
@@ -193,6 +200,20 @@ export function ProfileForm({ open, profile, groups, onClose, onSaved }: Props) 
     }
   }, [open, form.os, gpusLoaded])
 
+  useEffect(() => {
+    if (!open) return
+    let cancelled = false
+    systemAPI
+      .browser()
+      .then((status) => {
+        if (!cancelled) setVersions(status.versions ?? [])
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [open])
+
   const gpuOptions = useMemo(() => {
     const list = gpus[form.os] ?? []
     const named = list.map((choice) => ({ ...choice, name: shortGpu(choice.renderer) }))
@@ -228,6 +249,7 @@ export function ProfileForm({ open, profile, groups, onClose, onSaved }: Props) 
       languages: languages.length ? languages : null,
       timezone: form.timezone.trim() || null,
       webrtc_policy: form.webrtcPolicy,
+      phasmid_version: form.phasmidVersion.trim() || null,
     }
   }
 
@@ -748,6 +770,33 @@ export function ProfileForm({ open, profile, groups, onClose, onSaved }: Props) 
             </select>
             <p className="mt-1.5 text-ink-faint">
               {WEBRTC_POLICIES.find((policy) => policy.value === form.webrtcPolicy)?.hint}
+            </p>
+          </div>
+
+          <div className="col-span-2">
+            <label className="field-label" htmlFor="pf-phasmid-version">
+              Phasmid version
+            </label>
+            <input
+              id="pf-phasmid-version"
+              className="field font-mono"
+              list="pf-phasmid-versions"
+              value={form.phasmidVersion}
+              onChange={(e) => set('phasmidVersion', e.target.value)}
+              placeholder={versions[0] ? `Newest (now ${versions[0]})` : 'Newest'}
+              aria-describedby="pf-phasmid-version-hint"
+              spellCheck={false}
+              autoComplete="off"
+            />
+            <datalist id="pf-phasmid-versions">
+              {versions.map((version) => (
+                <option key={version} value={version} />
+              ))}
+            </datalist>
+            <p id="pf-phasmid-version-hint" className="mt-1.5 text-ink-faint">
+              Blank launches with the newest release, which is installed when the manager
+              starts. A release tag pins this profile to it; one not installed yet is
+              downloaded.
             </p>
           </div>
 

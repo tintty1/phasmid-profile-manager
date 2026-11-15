@@ -220,7 +220,11 @@ def list_gpus(os_family: str | None = None) -> list[dict[str, Any]]:
     return [dict(g) for g in gpus if os_family is None or g["os"] == os_family]
 
 
-def summarize(pin: dict[str, Any] | None, settings_os: str | None = None) -> dict[str, Any] | None:
+def summarize(
+    pin: dict[str, Any] | None,
+    settings_os: str | None = None,
+    phasmid_version: str | None = None,
+) -> dict[str, Any] | None:
     """The few values of a pinned machine worth showing a person.
 
     The stored profile is a few hundred values and tens of kilobytes; this is
@@ -237,7 +241,7 @@ def summarize(pin: dict[str, Any] | None, settings_os: str | None = None) -> dic
     where = pinned_location(pin)
     family = pinned_os(pin)
     width, height = display.get("width"), display.get("height")
-    installation = browser_install.current_installation()
+    installation = browser_install.installation_for(phasmid_version)
     return {
         "id": pin.get("id"),
         "seed": pin.get("seed"),
@@ -256,8 +260,9 @@ def summarize(pin: dict[str, Any] | None, settings_os: str | None = None) -> dic
         "public_ip": where["public_ip"],
         "has_geolocation": bool(where["geolocation"]),
         # Phasmid reports the version it was built from, so the browser a
-        # profile claims is whichever release is installed; nothing to refresh.
-        "browser_version": installation.version if installation else None,
+        # profile claims is the release it launches with: the one it pins, or
+        # the newest installed. Nothing in the machine to refresh.
+        "browser_version": installation.version if installation else phasmid_version,
         "pinned_os": family,
         "settings_os": settings_os,
         "os_mismatch": bool(family and settings_os and family != settings_os),

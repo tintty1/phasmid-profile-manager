@@ -20,6 +20,17 @@ def test_a_gpu_is_normalised_and_checked():
         BrowserSettings(gpu="RTX 3060")
 
 
+def test_a_phasmid_version_is_a_release_tag():
+    assert BrowserSettings().phasmid_version is None
+    assert BrowserSettings(phasmid_version=" ").phasmid_version is None
+    assert BrowserSettings(phasmid_version=" 155.0.8059.84-p1 ").phasmid_version == (
+        "155.0.8059.84-p1"
+    )
+    for bad in ("../etc", "155/0", ".hidden", "a..b"):
+        with pytest.raises(ValueError, match="release tag"):
+            BrowserSettings(phasmid_version=bad)
+
+
 def test_blank_languages_follow_the_proxy():
     assert BrowserSettings(languages=["", " "]).languages is None
     assert BrowserSettings(languages=[" de-DE", "de"]).languages == ["de-DE", "de"]

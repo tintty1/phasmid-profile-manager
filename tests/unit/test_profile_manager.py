@@ -191,6 +191,35 @@ async def test_launching_an_unknown_profile_says_so(profile_manager):
 
 
 @pytest.mark.asyncio
+async def test_a_profile_pinned_to_an_installed_release_launches_with_it(profile_manager, phasmid):
+    profile = await profile_manager.create_profile(
+        name="p", browser_settings={"phasmid_version": phasmid.installation.version}
+    )
+
+    await profile_manager.launch_browser(profile.id, mode="headless")
+
+    assert launched(profile_manager, profile.id)["argv"][0] == str(phasmid.installation.binary)
+    assert phasmid.install_requests == []
+
+
+@pytest.mark.asyncio
+async def test_a_profile_pinned_to_a_missing_release_downloads_it_and_does_not_launch(
+    profile_manager, phasmid
+):
+    profile = await profile_manager.create_profile(name="p")
+
+    await profile_manager.update_profile(
+        profile.id, {"browser_settings": {"phasmid_version": "154.0.1.2-p1"}}
+    )
+    assert phasmid.install_requests == ["154.0.1.2-p1"], "saving the pin starts the download"
+
+    with pytest.raises(BrowserLaunchError, match="154.0.1.2-p1"):
+        await profile_manager.launch_browser(profile.id, mode="headless")
+    assert await profile_manager.storage.get_lease(profile.id) == (None, None)
+    assert not profile_manager.browser_sessions.is_running(profile.id)
+
+
+@pytest.mark.asyncio
 async def test_a_launch_hands_the_browser_its_machine(profile_manager, phasmid):
     profile = await profile_manager.create_profile(
         name="p", browser_settings={"webrtc_policy": "disable_non_proxied_udp"}

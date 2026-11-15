@@ -47,6 +47,7 @@ GPU, placed at its exit address.
 | Browser languages | Comma-separated, e.g. `en-US, en`. Empty: follow the proxy. |
 | Timezone | IANA name, e.g. `Europe/Berlin`. Empty: follow the proxy. |
 | WebRTC policy | `default`, `default_public_interface_only`, `default_public_and_private_interfaces` or `disable_non_proxied_udp`. Empty means `default`. |
+| Phasmid version | A release tag such as `155.0.8059.84-p1` to pin the profile to. Empty launches with the newest installed release. |
 | Proxy type | `http`, `https`, `socks5`. Empty for no proxy. `socks4` imports but cannot launch. |
 | Proxy server | `host:port`. Empty for no proxy. |
 | Proxy username / Proxy password | Optional. |

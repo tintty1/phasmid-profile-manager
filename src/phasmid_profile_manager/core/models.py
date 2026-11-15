@@ -104,6 +104,11 @@ class BrowserSettings(BaseModel):
     # Chrome's WebRTC IP handling policy. "default" is what stock Chrome does;
     # mDNS already hides host candidates there.
     webrtc_policy: WebRTCPolicy = "default"
+    # The Phasmid release this profile launches with, e.g. 155.0.8059.84-p1.
+    # Unset: the newest installed release, which the manager updates on start.
+    # Phasmid reports the Chrome version it was built from, so pinning keeps the
+    # browser version a site has seen for this profile from moving.
+    phasmid_version: str | None = None
 
     @field_validator("gpu")
     @classmethod
@@ -113,6 +118,18 @@ class BrowserSettings(BaseModel):
         value = value.strip().lower()
         if not _GPU_KEY.match(value):
             raise ValueError("gpu is <vendor_id>:<device_id>, e.g. 0x10de:0x2504")
+        return value
+
+    @field_validator("phasmid_version")
+    @classmethod
+    def _phasmid_version(cls, value: str | None) -> str | None:
+        if value is None or not value.strip():
+            return None
+        from .browser_install import valid_tag
+
+        value = value.strip()
+        if not valid_tag(value):
+            raise ValueError("phasmid_version is a Phasmid release tag, e.g. 155.0.8059.84-p1")
         return value
 
     @field_validator("languages")
@@ -292,7 +309,8 @@ class ScheduleAction(str, Enum):
     regeneration stays a manual action (reset-fingerprint), which warns about
     the cost. Nor is there a browser-version refresh: Phasmid reports the
     version it was built from, so a profile's browser is updated by installing
-    a newer release, for every profile at once, as on a real machine.
+    a newer release (which the manager does on start for every profile that
+    does not pin ``phasmid_version``), as on a real machine.
     """
 
     LAUNCH = "launch"

@@ -9,6 +9,7 @@ import pytest
 from phasmid_profile_manager import main
 from phasmid_profile_manager.api import dependencies
 from phasmid_profile_manager.api.routes import recovery
+from phasmid_profile_manager.core import browser_install
 from phasmid_profile_manager.core.database import StorageManager
 from phasmid_profile_manager.core.profile_manager import ProfileManager
 
@@ -20,7 +21,13 @@ async def startup_database(tmp_path, monkeypatch):
     await storage.initialize()
     manager = ProfileManager(storage, str(tmp_path))
     for name in ("active account", "trashed account"):
-        profile = await manager.create_profile(name, generate_fingerprint=False)
+        profile = await manager.create_profile(
+            name,
+            generate_fingerprint=False,
+            browser_settings={"phasmid_version": "155.0.8059.84-p1"}
+            if name.startswith("active")
+            else None,
+        )
         Path(profile.storage_path, "cookies.sqlite").write_bytes(name.encode())
         if name.startswith("trashed"):
             await manager.delete_profile(profile.id)
@@ -31,6 +38,10 @@ async def startup_database(tmp_path, monkeypatch):
     for variable in ("_storage_manager", "_profile_manager", "_scheduler"):
         monkeypatch.setattr(dependencies, variable, None)
     monkeypatch.setattr(recovery, "_backup_manager", None)
+    # Recorded, never run: an update on start would reach GitHub.
+    updates: list[list[str]] = []
+    monkeypatch.setattr(browser_install, "update_on_start", lambda pinned: updates.append(pinned))
+    monkeypatch.setattr(main, "_startup_updates", updates, raising=False)
     return db_path
 
 
@@ -50,6 +61,8 @@ async def test_real_lifespan_automatically_backs_up_active_and_trashed_profiles(
             "automatic",
         ]
         assert len(await manager.list_trashed_profiles()) == 1
+        # Phasmid is brought up to date on start, with the releases profiles pin.
+        assert main._startup_updates == [["155.0.8059.84-p1"]]
         created_tasks = asyncio.all_tasks() - tasks_before
         assert any(task.get_name() == "profile-backups" for task in created_tasks)
     assert manager.storage.db._connection is None

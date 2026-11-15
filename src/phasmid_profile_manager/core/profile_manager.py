@@ -35,6 +35,17 @@ from .profile_operations import (
 from .vnc import VncDisplays
 
 
+def fetch_pinned_release(version: str | None) -> None:
+    """Start downloading a release a profile was just pinned to, if it is missing.
+
+    Not before the first install: that download stays one a person starts.
+    """
+    if not version or browser_install.current_installation() is None:
+        return
+    if not browser_install.installed_browser(version)[0]:
+        browser_install.browser_installer.start(version)
+
+
 class ProfileManager:
     """Manage browser profiles: CRUD, cloning, export/import, groups."""
 
@@ -152,6 +163,7 @@ class ProfileManager:
 
         # Save the profile to the database
         await self.storage.save_profile(profile)
+        fetch_pinned_release(profile.browser_settings.phasmid_version)
 
         # Log profile creation
         await self.storage.log_usage(
@@ -276,6 +288,9 @@ class ProfileManager:
                 details={"updated_fields": list(updates.keys())},
             )
         )
+
+        if profile.browser_settings.phasmid_version != settings_before.phasmid_version:
+            fetch_pinned_release(profile.browser_settings.phasmid_version)
 
         logger.info(f"Profile {profile_id} updated")
         return profile
@@ -825,7 +840,9 @@ class ProfileManager:
         """
         if window_size:
             logger.debug(f"Ignoring window_size {window_size!r}: the profile sets the window")
-        installation = browser_install.require_installation()
+        # Refuse before taking the lease when nothing is installed at all; the
+        # release this profile pins is checked once the profile is read.
+        browser_install.require_installation()
         acquired = await self.storage.acquire_lease(
             profile_id, self.lease_holder, get_settings().lease_ttl
         )
@@ -868,10 +885,12 @@ class ProfileManager:
                     "downloads_dir": str(self.downloads_dir(profile_id)),
                 }
 
+            settings = profile.browser_settings
+            installation = browser_install.require_installation(settings.phasmid_version)
+
             data_path = profile_data_path(self, profile)
             data_path.mkdir(parents=True, exist_ok=True)
             profile.storage_path = str(data_path)
-            settings = profile.browser_settings
 
             if profile.proxy is not None and profile.proxy.type == ProxyType.SOCKS4:
                 raise BrowserLaunchError(proxy_check.SOCKS4_UNSUPPORTED)

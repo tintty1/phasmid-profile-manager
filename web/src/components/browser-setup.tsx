@@ -64,7 +64,7 @@ export function BrowserSetup({ firstProfile = false, onCreate }: { firstProfile?
         <div className="min-w-0 flex-1">
           <h2 className="font-semibold">{ready ? (firstProfile ? 'Ready for your first profile' : 'Phasmid browser is ready') : downloading ? 'Installing Phasmid browser' : 'Set up your browser'}</h2>
           <p className="mt-1 text-ink-dim">
-            {ready ? `Phasmid ${browser.version || 'installed'}. Each profile keeps its own cookies, storage and fingerprint.` : 'Download the browser once to launch profiles. Creating a profile does not require a download.'}
+            {ready ? `Phasmid ${browser.version || 'installed'}, updated when the manager starts.${(browser.versions?.length ?? 0) > 1 ? ` Also installed for pinned profiles: ${browser.versions!.filter((v) => v !== browser.version).join(', ')}.` : ''} Each profile keeps its own cookies, storage and fingerprint.` : 'Download the browser once to launch profiles. Creating a profile does not require a download.'}
           </p>
           <p className="mt-1 text-ink-dim" role="status" aria-live="polite">{browser?.message || (!error && !browser ? 'Checking browser files…' : '')}</p>
           {downloading && <div className="mt-3 flex items-center gap-3">

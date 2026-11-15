@@ -61,7 +61,8 @@ Status: pre-release. Linux x64 only, because Phasmid ships Linux x64 builds only
   bulk editing are built in.
 - **First-run install**: *Install browser* downloads the newest Phasmid
   release, verifies its checksum, and fetches the matching source tree (for
-  proxyroute) and the IP location database.
+  proxyroute) and the IP location database. After that, each start installs
+  a newer release if there is one. A profile can pin its own release instead.
 
 ## Install and run
 
@@ -208,6 +209,7 @@ working directory is read too; [`.env.example`](.env.example) is a template.
 | `PPM_VNC` | `0` (`1` in Docker) | Headed launches default to their own VNC display instead of a desktop window |
 | `PPM_PHASMID_REPO` | `tintty1/phasmid` | GitHub repository *Install browser* takes releases from |
 | `PPM_PHASMID_RELEASE` | *(newest)* | Install this release tag instead of the newest one |
+| `PPM_PHASMID_AUTO_UPDATE` | `true` | Once a release is installed, install a newer one (and any release a profile pins) on every start |
 | `PPM_PHASMID_BINARY` | *(empty)* | A local Phasmid `chrome` binary to launch instead of the downloaded one |
 | `PPM_PHASMID_SOURCE` | *(empty)* | A local Phasmid checkout to run `tools/proxyroute` from |
 | `PPM_BACKUP_INTERVAL_HOURS` | `24` | How often each profile is backed up automatically |

@@ -57,7 +57,10 @@ app, with **Retry download** if something fails. The install:
 The browser and source go into `phasmid/<tag>/` in the data folder; the database
 goes into phasmid-profile-gen's cache, `$XDG_CACHE_HOME/phasmid/geoip` (by default
 `~/.cache/phasmid/geoip`). An interrupted install leaves the previous one in
-use. `PPM_PHASMID_RELEASE` installs a given tag; `PPM_PHASMID_BINARY` and
+use. After that, each start of the manager installs a newer release if there
+is one; profiles launch with the newest unless their *Phasmid version* pins
+another. `PPM_PHASMID_AUTO_UPDATE=false` turns that off.
+`PPM_PHASMID_RELEASE` installs a given tag; `PPM_PHASMID_BINARY` and
 `PPM_PHASMID_SOURCE` use a local build and checkout instead.
 
 ## First profile

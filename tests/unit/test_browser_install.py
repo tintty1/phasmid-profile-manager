@@ -30,6 +30,7 @@ def isolated(tmp_path, monkeypatch):
         "PPM_PHASMID_BINARY",
         "PPM_PHASMID_SOURCE",
         "PPM_PHASMID_RELEASE",
+        "PPM_PHASMID_AUTO_UPDATE",
         geoip.ENV_MMDB,
     ):
         monkeypatch.delenv(name, raising=False)
@@ -80,6 +81,7 @@ class FakeGitHub:
         self.checksum = hashlib.sha256(self.asset).hexdigest()
         self.source = tar_bytes(source_files(), f"phasmid-{TAG}", "w:gz")
         self.requests: list[str] = []
+        self.offline = False
         self.releases = [
             {"tag_name": "156.0.0.0-p1", "draft": True, "assets": []},
             {"tag_name": "155.0.0.0-rc", "draft": False, "assets": []},
@@ -101,7 +103,15 @@ class FakeGitHub:
         url = str(request.url)
         self.requests.append(url)
         if url == f"https://api.github.com/repos/{REPO}/releases":
+            if self.offline:
+                raise httpx.ConnectError("offline", request=request)
             return httpx.Response(200, json=self.releases)
+        if url.startswith(f"https://api.github.com/repos/{REPO}/releases/tags/"):
+            tag = url.rsplit("/", 1)[1]
+            for release in self.releases:
+                if release["tag_name"] == tag:
+                    return httpx.Response(200, json=release)
+            return httpx.Response(404)
         if url.endswith(".tar.zst.sha256"):
             return httpx.Response(200, text=f"{self.checksum}  phasmid-{TAG}-linux-x64.tar.zst\n")
         if url.endswith(".tar.zst"):
@@ -205,6 +215,58 @@ def test_a_local_build_and_checkout_are_used_as_configured(tmp_path, monkeypatch
     assert installed is True
     assert version == "155.0.8059.84 (local)"
     assert browser_install.current_installation() == Installation(version, binary, source)
+
+
+def install_fake(tmp_path: Path, tag: str, current: bool = False) -> Path:
+    """A complete release directory, as if downloaded; returns its binary."""
+    root = tmp_path / "data" / "phasmid"
+    binary = root / tag / "browser" / "chrome"
+    binary.parent.mkdir(parents=True)
+    binary.write_text("#!/bin/sh\n")
+    binary.chmod(0o755)
+    write_source(root / tag / "source")
+    if current:
+        (root / "current").write_text(tag + "\n")
+    return binary
+
+
+def test_a_pinned_release_launches_from_its_own_directory(tmp_path):
+    write_geoip(tmp_path)
+    newest = install_fake(tmp_path, "156.0.8078.79-p1", current=True)
+    older = install_fake(tmp_path, TAG)
+
+    assert browser_install.require_installation().binary == newest
+    assert browser_install.require_installation(TAG).binary == older
+    assert browser_install.installed_browser(TAG) == (True, TAG)
+
+
+def test_installed_versions_are_the_complete_ones_newest_first(tmp_path):
+    install_fake(tmp_path, TAG, current=True)
+    install_fake(tmp_path, "156.0.8078.79-p1")
+    install_fake(tmp_path, "155.0.8059.84-p2")
+    (tmp_path / "data" / "phasmid" / "157.0.0.0-p1").mkdir()  # an interrupted download
+
+    assert browser_install.installed_versions() == [
+        "156.0.8078.79-p1",
+        "155.0.8059.84-p2",
+        TAG,
+    ]
+
+
+def test_launching_with_a_missing_pinned_release_starts_its_download(tmp_path, monkeypatch):
+    write_geoip(tmp_path)
+    install_fake(tmp_path, "156.0.8078.79-p1", current=True)
+    asked: list[str | None] = []
+    monkeypatch.setattr(
+        browser_install.browser_installer,
+        "start",
+        lambda version=None, background=False: asked.append(version),
+    )
+
+    with pytest.raises(BrowserLaunchError, match=f"Phasmid {TAG}.*downloading"):
+        browser_install.require_installation(TAG)
+
+    assert asked == [TAG]
 
 
 # -- installing ----------------------------------------------------------------
@@ -333,3 +395,83 @@ def test_a_refusal_is_raised_in_genprofiles_words():
 def test_a_crash_reports_the_end_of_stderr():
     with pytest.raises(GenprofileError, match="something broke"):
         browser_install.run_genprofile("generate", {"mode": "crash"})
+
+
+# -- pinned releases and updates on start --------------------------------------
+
+
+def test_installing_a_pinned_release_leaves_current_alone(tmp_path, github):
+    install_fake(tmp_path, "156.0.8078.79-p1", current=True)
+    installer = browser_install.BrowserInstaller()
+
+    installer.start(TAG)
+    status = wait_done(installer)
+
+    assert status.state == "ready", status.error
+    root = tmp_path / "data" / "phasmid"
+    assert (root / "current").read_text().strip() == "156.0.8078.79-p1"
+    assert (root / TAG / "browser" / "chrome").is_file()
+    assert status.versions == ["156.0.8078.79-p1", TAG]
+
+
+def test_a_tag_that_could_name_a_path_is_refused():
+    with pytest.raises(ValueError, match="release tag"):
+        browser_install.BrowserInstaller().start("../../escape")
+
+
+def test_a_failed_background_update_keeps_the_installed_release_ready(tmp_path, github):
+    install_fake(tmp_path, TAG, current=True)
+    write_geoip(tmp_path)
+    github.offline = True
+    installer = browser_install.BrowserInstaller()
+
+    installer.start(background=True)
+    status = wait_done(installer)
+
+    assert status.state == "ready"
+    assert status.error is None
+    assert status.version == TAG
+
+
+def test_the_first_install_is_never_started_on_start(monkeypatch):
+    asked: list[str | None] = []
+    monkeypatch.setattr(
+        browser_install.browser_installer,
+        "start",
+        lambda version=None, background=False: asked.append(version),
+    )
+
+    browser_install.update_on_start([TAG])
+
+    assert asked == []
+
+
+def test_start_updates_to_the_newest_and_fetches_missing_pins(tmp_path, monkeypatch):
+    write_geoip(tmp_path)
+    install_fake(tmp_path, TAG, current=True)
+    asked: list[tuple[str | None, bool]] = []
+    monkeypatch.setattr(
+        browser_install.browser_installer,
+        "start",
+        lambda version=None, background=False: asked.append((version, background)),
+    )
+
+    browser_install.update_on_start([TAG, "154.0.1.2-p1", "154.0.1.2-p1"])
+
+    assert asked == [(None, True), ("154.0.1.2-p1", True)]
+
+
+def test_updates_on_start_can_be_turned_off(tmp_path, monkeypatch):
+    install_fake(tmp_path, TAG, current=True)
+    monkeypatch.setenv("PPM_PHASMID_AUTO_UPDATE", "false")
+    get_settings.cache_clear()
+    asked: list[str | None] = []
+    monkeypatch.setattr(
+        browser_install.browser_installer,
+        "start",
+        lambda version=None, background=False: asked.append(version),
+    )
+
+    browser_install.update_on_start([])
+
+    assert asked == []

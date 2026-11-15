@@ -49,7 +49,8 @@ Create / update body (every field optional except `name` on create):
     "gpu": "0x10de:0x2504",
     "languages": null,
     "timezone": null,
-    "webrtc_policy": "default"
+    "webrtc_policy": "default",
+    "phasmid_version": null
   },
   "proxy_config": {"type": "socks5", "server": "host:1080", "username": "u", "password": "p"},
   "row_version": 7
@@ -65,6 +66,10 @@ Create / update body (every field optional except `name` on create):
   over the exit and drops the position.
 - `webrtc_policy`: `default`, `default_public_interface_only`,
   `default_public_and_private_interfaces`, `disable_non_proxied_udp`.
+- `phasmid_version`: leave unset to launch with the newest installed Phasmid,
+  which the manager updates on start. A release tag (e.g. `155.0.8059.84-p1`)
+  pins the profile to it; a launch before that release is downloaded fails
+  with a message saying it is downloading.
 - `status` (update only): `active`, `inactive`, `blocked`, `maintenance`; bookkeeping.
 - `protected`: while true, `DELETE`, the Trash purge, `reset-fingerprint` and
   `reconcile-os` with `keep_machine: false` answer `409` with code `protected`.

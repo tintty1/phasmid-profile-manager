@@ -20,7 +20,8 @@ class ProfileCreateRequest(BaseModel):
         description=(
             "Machine settings: os (linux or windows), gpu (<vendor_id>:<device_id> from "
             "GET /api/v1/fingerprints/gpus), languages and timezone (unset: from the "
-            "proxy's exit address), webrtc_policy"
+            "proxy's exit address), webrtc_policy, phasmid_version (a release tag to "
+            "launch with; unset: the newest installed release)"
         ),
     )
     proxy_config: dict[str, Any] | None = Field(None, description="Proxy configuration")
@@ -160,6 +161,7 @@ class ProfileResponse(BaseModel):
             fingerprint=machine.summarize(
                 profile.fingerprint,
                 profile.browser_settings.os if profile.browser_settings else None,
+                profile.browser_settings.phasmid_version if profile.browser_settings else None,
             ),
             proxy_check=profile.proxy_check,
             row_version=profile.row_version,

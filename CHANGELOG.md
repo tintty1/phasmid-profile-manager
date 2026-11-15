@@ -14,6 +14,14 @@ The port of camoufox-profile-manager from Camoufox (Firefox via Playwright) to
 Phasmid (Chromium), driven over CDP.
 
 ### Added
+- Phasmid updates on start. Once a release is installed, each start of the
+  manager installs a newer one in the background, and profiles move to it at
+  their next launch. `browser_settings.phasmid_version` (*Phasmid version* in
+  the profile form, a column in Excel) pins a profile to a release instead;
+  releases are kept side by side in `<data dir>/phasmid/<tag>/`, and a pinned
+  one that is missing is downloaded. `GET /api/v1/system/browser` lists the
+  installed releases in `versions`. `PPM_PHASMID_AUTO_UPDATE=false` turns the
+  update off.
 - *Copy CDP URL* in the browser viewer's toolbar, beside the one in a profile's
   menu. Copying falls back to `execCommand` when the UI is served over plain
   http (no `navigator.clipboard`), and shows the URL to copy by hand if that

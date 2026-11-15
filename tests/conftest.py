@@ -105,6 +105,9 @@ class FakePhasmid:
     exit_ip: str | None = "198.51.100.7"
     exit_lookups: list[object] = field(default_factory=list)
     installed: bool = True
+    # Releases the installer was asked for (None: the newest), in order;
+    # recorded instead of downloaded.
+    install_requests: list[str | None] = field(default_factory=list)
 
 
 @pytest.fixture
@@ -127,21 +130,44 @@ def phasmid(tmp_path, monkeypatch, request) -> FakePhasmid:
             raise ConnectionError("The proxy did not answer.")
         return fake.exit_ip, 12
 
-    def require_installation() -> Installation:
-        if not fake.installed:
-            from phasmid_profile_manager.core.browser_session import BrowserLaunchError
+    def has(version: str | None) -> bool:
+        """Only the fake's own release is installed; a pin to any other is missing."""
+        return version is None or version == fake.installation.version
 
+    def require_installation(version: str | None = None) -> Installation:
+        from phasmid_profile_manager.core.browser_session import BrowserLaunchError
+
+        if not fake.installed:
             raise BrowserLaunchError("The browser needs setup.")
+        if not has(version):
+            fake.install_requests.append(version)
+            raise BrowserLaunchError(f"Phasmid {version} is not installed yet.")
         return fake.installation
 
     monkeypatch.setattr(browser_install, "run_genprofile", fake.genprofile)
     machine._gpus.cache_clear()
     monkeypatch.setattr(
-        browser_install, "installed_browser", lambda: (fake.installed, fake.installation.version)
+        browser_install,
+        "installed_browser",
+        lambda version=None: (
+            fake.installed and has(version),
+            fake.installation.version if has(version) else None,
+        ),
     )
     monkeypatch.setattr(browser_install, "current_installation", lambda: fake.installation)
+    monkeypatch.setattr(
+        browser_install,
+        "installation_for",
+        lambda version: fake.installation if has(version) else None,
+    )
     monkeypatch.setattr(browser_install, "require_installation", require_installation)
     monkeypatch.setattr(proxy_check, "resolve_exit_ip", resolve_exit_ip)
+
+    def start(version=None, background=False):
+        fake.install_requests.append(version)
+        return browser_install.BrowserStatus(installed=fake.installed)
+
+    monkeypatch.setattr(browser_install.browser_installer, "start", start)
     return fake
 
 

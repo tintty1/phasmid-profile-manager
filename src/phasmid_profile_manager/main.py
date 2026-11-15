@@ -72,6 +72,17 @@ async def lifespan(app: FastAPI):
                     logger.warning(f"Automatic profile backup failed: {exc}")
                 await asyncio.sleep(60)
 
+        # Bring Phasmid up to date in the background: profiles without a pinned
+        # version launch with the newest release, pinned ones with theirs.
+        from phasmid_profile_manager.core import browser_install
+
+        pinned = [
+            p.browser_settings.phasmid_version
+            for p in await profile_manager.list_profiles()
+            if p.browser_settings.phasmid_version
+        ]
+        browser_install.update_on_start(pinned)
+
         scheduler = TaskScheduler(storage_manager, profile_manager)
         await scheduler.start()
         set_scheduler(scheduler)

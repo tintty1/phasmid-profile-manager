@@ -32,9 +32,13 @@ comes whole from one capture of a real device; nothing is sampled or derived. Th
   `404` while the profile has no machine yet. In the UI: **View machine JSON**
   in the profile's Machine panel.
 
-The browser version is not part of the pin. Phasmid reports the version it was
-built from, so every profile reports whichever release is installed, and
-installing a newer release updates all of them at once, as on a real machine.
+The browser version is not part of the machine. Phasmid reports the version it
+was built from, so a profile reports the release it launches with: the newest
+installed one, unless `phasmid_version` pins it to another. Once a release is
+installed, every start of the manager installs a newer one if there is one,
+in the background, so unpinned profiles move to it at their next launch, as on
+a real machine that auto-updates. A browser already open keeps the release it
+started with. `PPM_PHASMID_AUTO_UPDATE=false` turns the check off.
 
 ## Settings
 
@@ -47,6 +51,7 @@ installing a newer release updates all of them at once, as on a real machine.
 | `languages` | list, e.g. `["de-DE", "de", "en-US", "en"]`, or unset | Unset, derived from the exit address. Set, wins over it on the next launch |
 | `timezone` | IANA name, e.g. `Europe/Berlin`, or unset | Unset, derived from the exit address. Set, wins over it on the next launch |
 | `webrtc_policy` | `default`, `default_public_interface_only`, `default_public_and_private_interfaces`, `disable_non_proxied_udp` | Chrome's WebRTC IP handling policy, written into each launch's profile file. `default` is what stock Chrome does |
+| `phasmid_version` | a release tag, e.g. `155.0.8059.84-p1`, or unset | The Phasmid release this profile launches with. Unset, the newest installed, which the manager updates on start. Set, that release, kept side by side with the others in `<data dir>/phasmid/<tag>/`; one not on disk is downloaded when the pin is saved, on the next start, or at a launch (which is refused until the download finishes) |
 
 `GET /api/v1/fingerprints/gpus?os=windows` lists the GPUs a machine may claim:
 those of the captured devices. Each entry has `os`, `gpu` (the value

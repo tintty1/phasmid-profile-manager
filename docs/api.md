@@ -175,7 +175,8 @@ POST /api/v1/profiles
     "gpu": "0x10de:0x2504",
     "languages": ["de-DE", "de", "en-US", "en"],
     "timezone": null,
-    "webrtc_policy": "default"
+    "webrtc_policy": "default",
+    "phasmid_version": null
   },
   "proxy_config": {
     "type": "socks5", "server": "host:1080",
@@ -190,7 +191,8 @@ or `windows`; `gpu` is a `<vendor_id>:<device_id>` from
 [`GET /fingerprints/gpus`](#gpus); `languages` and `timezone` unset follow the
 proxy's exit address; `webrtc_policy` is one of `default`,
 `default_public_interface_only`, `default_public_and_private_interfaces`,
-`disable_non_proxied_udp`. An unknown timezone or a malformed `gpu` is refused
+`disable_non_proxied_udp`; `phasmid_version` is a Phasmid release tag to launch
+with, or null for the newest installed. An unknown timezone or a malformed `gpu` is refused
 with `400` here (and with `422` on update).
 
 With `generate_fingerprint` (the default) and the browser installed, the machine
@@ -503,9 +505,10 @@ one snapshot per 24 hours and seven routine snapshots per profile
 (`PPM_BACKUP_INTERVAL_HOURS`, `PPM_BACKUP_RETENTION`). The two latest
 before-update checkpoints are kept separately.
 
-Browser status is `{installed, version, state, progress, message, error}`, where
+Browser status is `{installed, version, versions, state, progress, message, error}`, where
 `state` is `idle`, `downloading`, `ready` or `error`, and `progress` is 0-100 or
-null. `installed` is true only when the binary, the source tree with
+null. `version` is the release unpinned profiles launch with; `versions` lists
+every complete release on disk, newest first. `installed` is true only when the binary, the source tree with
 `tools/proxyroute`, and the location database are all present. GET downloads nothing. POST starts a background install in this
 process, and repeated POSTs while it runs reuse it; poll GET to see it finish.
 The install:
@@ -521,6 +524,17 @@ The install:
    127 MB unpacked) into `$XDG_CACHE_HOME/phasmid/geoip`;
 5. writes `<data dir>/phasmid/current` last, so an interrupted install leaves the
    previous one in use.
+
+Older releases stay on disk beside the new one, for the profiles that pin them
+(`browser_settings.phasmid_version`). A pinned release that is missing is
+installed the same way, by tag, without touching `current`: when the pin is
+saved, on start, or when a launch finds it missing (that launch is refused
+with a message saying so).
+
+Once a release is installed, every start of the manager runs this in the
+background (unless `PPM_PHASMID_AUTO_UPDATE=false`), together with any pinned
+release that is missing. A failure there is logged and leaves the installed
+releases in use; it is not shown as an install error.
 
 Parts already present are skipped. With `PPM_PHASMID_BINARY` and
 `PPM_PHASMID_SOURCE` both set, only the location database is downloaded. One of

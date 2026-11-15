@@ -19,8 +19,9 @@ close-on-window-close handling and the usage log all behave the same.
   that does not answer, or another instance holding the profile.
 
 There is no scheduled browser update. Phasmid reports the version it was built
-from, so every profile reports whichever release is installed; installing a
-newer release updates them all at once, as on a real machine.
+from, so a profile reports the release it launches with. The manager installs
+the newest release when it starts, and every profile without a pinned
+`phasmid_version` moves to it at its next launch, as on a real machine.
 
 ## What deliberately cannot be scheduled
 

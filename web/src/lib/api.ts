@@ -32,6 +32,8 @@ export interface BrowserSettings {
   languages?: string[] | null
   timezone?: string | null
   webrtc_policy?: WebRTCPolicy
+  /** A Phasmid release tag to launch with; null = the newest installed, updated on start. */
+  phasmid_version?: string | null
 }
 
 export interface ProxyConfig {
@@ -601,6 +603,8 @@ export interface SystemConfig {
 export interface BrowserReadiness {
   installed: boolean
   version: string | null
+  /** Every complete release on disk, newest first. */
+  versions?: string[]
   state: 'idle' | 'downloading' | 'ready' | 'error'
   progress: number | null
   message: string

@@ -285,12 +285,115 @@ def find_release(client: httpx.Client, repo: str, tag: str | None) -> dict[str, 
     for release in releases:
         if release.get("draft"):
             continue
-        names = {asset["name"] for asset in release.get("assets", [])}
-        wanted = ASSET.format(tag=release["tag_name"])
-        if wanted in names and f"{wanted}.sha256" in names:
+        if _has_linux_build(release):
             return release
     where = f" at {tag}" if tag else ""
     raise RuntimeError(f"No release of {repo} has a Linux x64 build{where}")
+
+
+def _has_linux_build(release: dict[str, Any]) -> bool:
+    names = {asset["name"] for asset in release.get("assets", [])}
+    wanted = ASSET.format(tag=release["tag_name"])
+    return wanted in names and f"{wanted}.sha256" in names
+
+
+class PhasmidReleases(BaseModel):
+    """What can be installed: every published release with a Linux build, newest first."""
+
+    current: str | None = None
+    latest: str | None = None
+    update_available: bool = False
+    releases: list[str] = []
+    installed: list[str] = []
+    error: str | None = None
+
+
+def available_releases() -> PhasmidReleases:
+    """Releases of ``phasmid_repo`` a profile can pin or the manager can update to."""
+    settings = get_settings()
+    installed = installed_versions()
+    current = current_installation()
+    current_tag = current.version if current and _complete(current) else None
+    try:
+        with httpx.Client(timeout=15) as client:
+            response = client.get(
+                f"https://api.github.com/repos/{settings.phasmid_repo}/releases",
+                headers={"Accept": "application/vnd.github+json"},
+            )
+            response.raise_for_status()
+            published = response.json()
+    except (httpx.HTTPError, ValueError) as exc:
+        logger.warning(f"Could not list Phasmid releases: {exc}")
+        return PhasmidReleases(
+            current=current_tag,
+            installed=installed,
+            error="Could not reach GitHub to list Phasmid releases.",
+        )
+    tags = [
+        release["tag_name"]
+        for release in published
+        if not release.get("draft")
+        and valid_tag(release.get("tag_name"))
+        and _has_linux_build(release)
+    ]
+    tags = sorted(set(tags), key=version_key, reverse=True)
+    latest = tags[0] if tags else None
+    return PhasmidReleases(
+        current=current_tag,
+        latest=latest,
+        update_available=bool(
+            latest
+            and current_tag
+            and valid_tag(current_tag)
+            and version_key(latest) > version_key(current_tag)
+        ),
+        releases=tags,
+        installed=installed,
+    )
+
+
+class BrowserVersion(BaseModel):
+    """One Phasmid release a profile can pin (``browser_settings.phasmid_version``)."""
+
+    version: str
+    # Complete on disk: a profile pinned to it launches without waiting.
+    installed: bool
+    # Published on GitHub with a Linux build: pinning it downloads it if missing.
+    published: bool
+    # The global release: what profiles without a pin launch with.
+    is_global: bool
+    is_latest: bool
+
+
+class BrowserVersions(BaseModel):
+    global_version: str | None = None
+    latest: str | None = None
+    versions: list[BrowserVersion] = []
+    # Set when GitHub could not be reached: ``versions`` then lists only what is installed.
+    error: str | None = None
+
+
+def browser_versions() -> BrowserVersions:
+    """Every version a profile can be pinned to, installed or published, newest first."""
+    found = available_releases()
+    published = set(found.releases)
+    installed = set(found.installed)
+    tags = sorted(published | installed, key=version_key, reverse=True)
+    return BrowserVersions(
+        global_version=found.current,
+        latest=found.latest,
+        versions=[
+            BrowserVersion(
+                version=tag,
+                installed=tag in installed,
+                published=tag in published,
+                is_global=tag == found.current,
+                is_latest=tag == found.latest,
+            )
+            for tag in tags
+        ],
+        error=found.error,
+    )
 
 
 def _asset_url(release: dict[str, Any], name: str) -> str:

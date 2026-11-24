@@ -483,12 +483,28 @@ POST   /api/v1/system/backups             {"profile_ids": ["id"], "reason": "man
 POST   /api/v1/system/backups/{id}/restore {"name": "Recovered profile"}
 GET    /api/v1/system/browser
 POST   /api/v1/system/browser/install
+GET    /api/v1/system/browser/releases
+GET    /api/v1/system/browser/versions
 GET    /api/v1/system/updates
 POST   /api/v1/system/updates/prepare
 ```
 
 These use the same authentication as the rest of the API and return
 `{success, message, data}`.
+
+`GET /system/browser/releases` lists the Phasmid releases published with a
+Linux build (`releases`, newest first), the global release (`current`), the
+newest one (`latest`), `update_available`, and what is on disk (`installed`).
+`POST /system/browser/install` installs the newest release and makes it the
+global one; profiles that pin `browser_settings.phasmid_version` keep theirs.
+
+`GET /system/browser/versions` is the list to pin from: every installed or
+published release, newest first, as `{version, installed, published,
+is_global, is_latest}`, with `global_version`, `latest`, and `error` when
+GitHub could not be reached (then only installed versions are listed). Pin a
+profile with `PUT /profiles/{id}` and `{"browser_settings": {"phasmid_version":
+"<version>"}}`; `null` unpins it. A pinned version not installed yet is
+downloaded.
 
 Trash has no automatic expiry. Restoring a profile reuses its id but leaves its
 schedules paused. Permanent deletion requires `confirm=true` and only accepts

@@ -611,6 +611,17 @@ export interface BrowserReadiness {
   error: string | null
 }
 
+/** Published Phasmid releases with a Linux build, newest first. */
+export interface PhasmidReleases {
+  /** The global release: what profiles without a pinned version launch with. */
+  current: string | null
+  latest: string | null
+  update_available: boolean
+  releases: string[]
+  installed: string[]
+  error: string | null
+}
+
 export interface AppUpdate {
   current_version: string
   latest_version: string | null
@@ -714,6 +725,10 @@ export const systemAPI = {
   },
   async installBrowser(): Promise<BrowserReadiness> {
     const body = await request<{ data: BrowserReadiness }>(`${API_PREFIX}/system/browser/install`, { method: 'POST' })
+    return body.data
+  },
+  async browserReleases(): Promise<PhasmidReleases> {
+    const body = await request<{ data: PhasmidReleases }>(`${API_PREFIX}/system/browser/releases`)
     return body.data
   },
   async updates(): Promise<AppUpdate> {

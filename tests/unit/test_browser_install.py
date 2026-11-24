@@ -475,3 +475,81 @@ def test_updates_on_start_can_be_turned_off(tmp_path, monkeypatch):
     browser_install.update_on_start([])
 
     assert asked == []
+
+
+# -- releases offered for updates and pins ---------------------------------------
+
+
+def test_releases_list_only_published_linux_builds_and_offer_a_newer_one(tmp_path, github):
+    write_geoip(tmp_path)
+    install_fake(tmp_path, "154.0.0.0-p1", current=True)
+
+    result = browser_install.available_releases()
+
+    assert result.error is None
+    assert result.releases == [TAG]  # the draft and the release without a build are left out
+    assert result.current == "154.0.0.0-p1"
+    assert result.latest == TAG
+    assert result.update_available
+    assert result.installed == ["154.0.0.0-p1"]
+
+
+def test_the_newest_installed_release_is_not_an_update(tmp_path, github):
+    write_geoip(tmp_path)
+    install_fake(tmp_path, TAG, current=True)
+
+    result = browser_install.available_releases()
+
+    assert result.latest == TAG
+    assert not result.update_available
+
+
+def test_releases_offline_keep_what_is_installed(tmp_path, github):
+    github.offline = True
+    write_geoip(tmp_path)
+    install_fake(tmp_path, TAG, current=True)
+
+    result = browser_install.available_releases()
+
+    assert result.error
+    assert result.releases == []
+    assert result.installed == [TAG]
+    assert not result.update_available
+
+
+def test_versions_merge_installed_and_published_releases(tmp_path, github):
+    write_geoip(tmp_path)
+    install_fake(tmp_path, "154.0.0.0-p1", current=True)
+
+    result = browser_install.browser_versions()
+
+    assert result.error is None
+    assert result.global_version == "154.0.0.0-p1"
+    assert result.latest == TAG
+    assert [v.model_dump() for v in result.versions] == [
+        {
+            "version": TAG,
+            "installed": False,
+            "published": True,
+            "is_global": False,
+            "is_latest": True,
+        },
+        {
+            "version": "154.0.0.0-p1",
+            "installed": True,
+            "published": False,
+            "is_global": True,
+            "is_latest": False,
+        },
+    ]
+
+
+def test_versions_offline_list_what_is_installed(tmp_path, github):
+    github.offline = True
+    write_geoip(tmp_path)
+    install_fake(tmp_path, TAG, current=True)
+
+    result = browser_install.browser_versions()
+
+    assert result.error
+    assert [(v.version, v.installed, v.is_global) for v in result.versions] == [(TAG, True, True)]

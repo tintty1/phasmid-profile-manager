@@ -160,6 +160,9 @@ export function ProfileForm({ open, profile, groups, onClose, onSaved }: Props) 
   const [gpus, setGpus] = useState<Record<string, GpuChoice[]>>({})
   // Phasmid releases on disk, newest first, offered for the version pin.
   const [versions, setVersions] = useState<string[]>([])
+  // Releases published on GitHub (also downloadable for a pin) and the global one.
+  const [published, setPublished] = useState<string[]>([])
+  const [globalVersion, setGlobalVersion] = useState<string | null>(null)
   // The version this form was filled from. Sent with the save so that an edit
   // somebody else made in the meantime is refused instead of being overwritten,
   // and moved on after a refused save so a deliberate second Save can proceed.
@@ -206,13 +209,38 @@ export function ProfileForm({ open, profile, groups, onClose, onSaved }: Props) 
     systemAPI
       .browser()
       .then((status) => {
-        if (!cancelled) setVersions(status.versions ?? [])
+        if (!cancelled) {
+          setVersions(status.versions ?? [])
+          setGlobalVersion(status.version)
+        }
+      })
+      .catch(() => {})
+    systemAPI
+      .browserReleases()
+      .then((result) => {
+        if (!cancelled) setPublished(result.releases)
       })
       .catch(() => {})
     return () => {
       cancelled = true
     }
   }, [open])
+
+  // Installed and published releases, newest first, plus a pin that is neither.
+  const versionChoices = useMemo(() => {
+    const all = new Set([...versions, ...published])
+    if (form.phasmidVersion) all.add(form.phasmidVersion)
+    const key = (tag: string) => tag.match(/\d+/g)?.map(Number) ?? []
+    return [...all].sort((a, b) => {
+      const left = key(a)
+      const right = key(b)
+      for (let i = 0; i < Math.max(left.length, right.length); i++) {
+        const diff = (right[i] ?? -1) - (left[i] ?? -1)
+        if (diff) return diff
+      }
+      return 0
+    })
+  }, [versions, published, form.phasmidVersion])
 
   const gpuOptions = useMemo(() => {
     const list = gpus[form.os] ?? []
@@ -777,26 +805,27 @@ export function ProfileForm({ open, profile, groups, onClose, onSaved }: Props) 
             <label className="field-label" htmlFor="pf-phasmid-version">
               Phasmid version
             </label>
-            <input
+            <select
               id="pf-phasmid-version"
               className="field font-mono"
-              list="pf-phasmid-versions"
               value={form.phasmidVersion}
               onChange={(e) => set('phasmidVersion', e.target.value)}
-              placeholder={versions[0] ? `Newest (now ${versions[0]})` : 'Newest'}
               aria-describedby="pf-phasmid-version-hint"
-              spellCheck={false}
-              autoComplete="off"
-            />
-            <datalist id="pf-phasmid-versions">
-              {versions.map((version) => (
-                <option key={version} value={version} />
+            >
+              <option value="">
+                {globalVersion ? `Global (now ${globalVersion})` : 'Global (newest installed)'}
+              </option>
+              {versionChoices.map((version) => (
+                <option key={version} value={version}>
+                  {version}
+                  {versions.includes(version) ? '' : ' (downloads when saved)'}
+                </option>
               ))}
-            </datalist>
+            </select>
             <p id="pf-phasmid-version-hint" className="mt-1.5 text-ink-faint">
-              Blank launches with the newest release, which is installed when the manager
-              starts. A release tag pins this profile to it; one not installed yet is
-              downloaded.
+              Global follows the manager&apos;s release, updated to the newest when it starts.
+              A pinned release is the one this profile launches with, whatever the global
+              release is; one not installed yet is downloaded.
             </p>
           </div>
 

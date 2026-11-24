@@ -40,6 +40,9 @@ async def check_update() -> UpdateStatus:
                 f"https://api.github.com/repos/{REPOSITORY}/releases/latest",
                 headers={"Accept": "application/vnd.github+json"},
             )
+            if response.status_code == 404:
+                # The repository has no published release yet: nothing to update to.
+                return UpdateStatus()
             response.raise_for_status()
             release = response.json()
         tag = release["tag_name"]

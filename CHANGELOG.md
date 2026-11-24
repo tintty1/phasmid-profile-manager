@@ -22,6 +22,20 @@ Phasmid (Chromium), driven over CDP.
   one that is missing is downloaded. `GET /api/v1/system/browser` lists the
   installed releases in `versions`. `PPM_PHASMID_AUTO_UPDATE=false` turns the
   update off.
+- *Check for update* for the Phasmid browser in Settings, which offers
+  *Update to <tag>* when a newer release is published
+  (`GET /api/v1/system/browser/releases`). The profile list has a *Browser*
+  column with the release each profile launches with, marked when pinned, and
+  the profile form's *Phasmid version* is a list of the installed and published
+  releases, with *Global* for the manager's own.
+- `GET /api/v1/system/browser/versions`: every Phasmid version a profile can
+  pin, installed or published, with its state. The agent skill's `ppm.py`
+  gains `versions`, `pin`, `unpin` and `create --browser`, and SKILL.md says
+  how to pin.
+
+### Fixed
+- *Check for updates* (App updates) said to check the connection when the
+  repository had no release yet; it now reports the app as up to date.
 - *Copy CDP URL* in the browser viewer's toolbar, beside the one in a profile's
   menu. Copying falls back to `execCommand` when the UI is served over plain
   http (no `navigator.clipboard`), and shows the URL to copy by hand if that

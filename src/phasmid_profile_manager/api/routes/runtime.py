@@ -1,10 +1,18 @@
 """First-run browser download and application update preparation."""
 
 from fastapi import APIRouter, HTTPException
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
 from phasmid_profile_manager.api.models.system import ApiResponse
-from phasmid_profile_manager.core.browser_install import BrowserStatus, browser_installer
+from phasmid_profile_manager.core.browser_install import (
+    BrowserStatus,
+    BrowserVersions,
+    PhasmidReleases,
+    available_releases,
+    browser_installer,
+    browser_versions,
+)
 from phasmid_profile_manager.core.updates import UpdateStatus, check_update
 
 router = APIRouter()
@@ -17,7 +25,24 @@ async def browser_status():
 
 @router.post("/system/browser/install", response_model=ApiResponse[BrowserStatus])
 async def install_browser():
+    """Install the newest Phasmid release and make it the global one (also the update)."""
     return ApiResponse(data=browser_installer.start())
+
+
+@router.get("/system/browser/releases", response_model=ApiResponse[PhasmidReleases])
+async def browser_releases():
+    """Published Phasmid releases: whether an update exists, and what a profile can pin."""
+    return ApiResponse(data=await run_in_threadpool(available_releases))
+
+
+@router.get("/system/browser/versions", response_model=ApiResponse[BrowserVersions])
+async def list_browser_versions():
+    """Every Phasmid version a profile can pin, with whether each is installed.
+
+    Pin one with ``PUT /profiles/{id}`` and ``{"browser_settings":
+    {"phasmid_version": "<version>"}}``; ``null`` unpins (back to the global release).
+    """
+    return ApiResponse(data=await run_in_threadpool(browser_versions))
 
 
 @router.get("/system/updates", response_model=ApiResponse[UpdateStatus])

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { Check, Download, LoaderCircle, RefreshCw, X } from 'lucide-react'
-import { systemAPI, type BrowserReadiness } from '@/lib/api'
+import { systemAPI, type BrowserReadiness, type PhasmidReleases } from '@/lib/api'
 
 /** Readiness always comes from the executable on disk, never a Python import. */
 export function BrowserSetup({ firstProfile = false, onCreate }: { firstProfile?: boolean; onCreate?: () => void }) {
@@ -10,6 +10,8 @@ export function BrowserSetup({ firstProfile = false, onCreate }: { firstProfile?
   const [error, setError] = useState<string | null>(null)
   const [requesting, setRequesting] = useState(false)
   const [dismissed, setDismissed] = useState(false)
+  const [releases, setReleases] = useState<PhasmidReleases | null>(null)
+  const [checkingUpdate, setCheckingUpdate] = useState(false)
   const load = useCallback(async () => {
     try {
       setBrowser(await systemAPI.browser())
@@ -35,9 +37,24 @@ export function BrowserSetup({ firstProfile = false, onCreate }: { firstProfile?
     return () => clearInterval(timer)
   }, [browser?.state, load])
 
+  async function checkUpdate() {
+    setCheckingUpdate(true)
+    setError(null)
+    try {
+      const result = await systemAPI.browserReleases()
+      setReleases(result)
+      if (result.error) setError(result.error)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setCheckingUpdate(false)
+    }
+  }
+
   async function install() {
     setRequesting(true)
     setError(null)
+    setReleases(null)
     try {
       setBrowser(await systemAPI.installBrowser())
     } catch (err) {
@@ -71,13 +88,19 @@ export function BrowserSetup({ firstProfile = false, onCreate }: { firstProfile?
             <progress aria-label="Browser installation progress" className="h-2 w-full accent-signal" max={100} value={progress ?? undefined} />
             {progress !== null && <span className="font-mono text-ink-dim">{Math.round(progress)}%</span>}
           </div>}
+          {ready && !onCreate && releases && !releases.error && <p className="mt-1 text-ink-dim" role="status">
+            {releases.update_available
+              ? `Phasmid ${releases.latest} is available. Profiles without a pinned version will launch with it; pinned profiles keep their release.`
+              : `You have the newest release (${releases.current ?? browser.version}).`}
+          </p>}
           {failure && <p className="mt-2 break-words text-danger" role="alert">{failure}</p>}
           <div className="mt-3 flex flex-wrap gap-2">
             {!ready && <button className="btn btn-primary" disabled={downloading || (!browser && !error)} onClick={browser ? install : load}>
               {downloading ? 'Installing…' : !browser ? 'Check again' : failure ? 'Retry installation' : 'Install browser'}
             </button>}
             {ready && onCreate && <button className="btn btn-primary" onClick={onCreate}>Create first profile</button>}
-            {ready && !onCreate && <button className="btn btn-default" disabled={downloading} onClick={install}><RefreshCw size={13} aria-hidden="true" />Retry download</button>}
+            {ready && !onCreate && !releases?.update_available && <button className="btn btn-default" disabled={downloading || checkingUpdate} onClick={checkUpdate}>{checkingUpdate ? <LoaderCircle size={13} className="animate-spin motion-reduce:animate-none" aria-hidden="true" /> : <RefreshCw size={13} aria-hidden="true" />}{checkingUpdate ? 'Checking…' : 'Check for update'}</button>}
+            {ready && !onCreate && releases?.update_available && <button className="btn btn-primary" disabled={downloading} onClick={install}><Download size={13} aria-hidden="true" />Update to {releases.latest}</button>}
             {!ready && onCreate && firstProfile && <button className="btn btn-default" onClick={onCreate}>Create a profile first</button>}
             {!onCreate && <button className="btn btn-ghost" disabled={downloading} onClick={load}>Check again</button>}
           </div>

@@ -98,6 +98,38 @@ python scripts/ppm.py update shop-de-02 --json \
 A copy of a logged-in profile is logged in too — the same session, now in two
 places. For a fresh account, create rather than clone.
 
+## Pin a browser version
+
+Every profile launches with the **global** Phasmid version (the newest
+installed; the manager updates it on start) unless it **pins** one. A pinned
+profile launches with its own version whatever the global one is, so a
+warmed-up account keeps claiming the same browser across updates.
+
+```bash
+python scripts/ppm.py versions                         # what can be pinned
+python scripts/ppm.py pin shop-de-01 155.0.8059.84-p1  # use exactly this version
+python scripts/ppm.py unpin shop-de-01                 # follow the global version again
+python scripts/ppm.py create shop-de-03 --browser 155.0.8059.84-p1
+```
+
+`versions` returns `global_version`, `latest` and `versions` (newest first),
+each `{version, installed, published, is_global, is_latest}`:
+
+- Pin only a `version` from that list; `ppm.py` refuses anything else.
+- `installed: false` means pinning starts its download (several hundred MB).
+  Launching before it finishes fails with a message that it is downloading:
+  poll `GET /api/v1/system/browser` until `state` is `ready`, then launch.
+- `error` set means GitHub was unreachable; the list then holds only the
+  installed versions, which are still safe to pin.
+- The pin takes effect at the next launch; a running browser keeps its version.
+  The machine reports the version it launches with, so changing the pin of a
+  warmed-up account changes the browser it claims: don't do it unasked.
+- Over REST: `GET /api/v1/system/browser/versions`, then `PUT
+  /api/v1/profiles/{id}` with `{"row_version": N, "browser_settings":
+  {"phasmid_version": "<version>"}}`; `null` unpins. A profile's current pin is
+  `browser_settings.phasmid_version`, and the version it launches with is
+  `fingerprint.browser_version`.
+
 ## Destroy a profile
 
 Two steps, on purpose:

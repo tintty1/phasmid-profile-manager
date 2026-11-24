@@ -11,7 +11,11 @@ from phasmid_profile_manager.api.dependencies import get_profile_manager
 from phasmid_profile_manager.api.routes import recovery, runtime
 from phasmid_profile_manager.config import get_settings
 from phasmid_profile_manager.core.backups import ProfileBackupManager
-from phasmid_profile_manager.core.browser_install import BrowserStatus
+from phasmid_profile_manager.core.browser_install import (
+    BrowserStatus,
+    BrowserVersion,
+    BrowserVersions,
+)
 from phasmid_profile_manager.core.updates import RELEASES, UpdateStatus
 from phasmid_profile_manager.main import app
 
@@ -78,6 +82,8 @@ async def test_runtime_routes_use_existing_api_auth_guard(client, monkeypatch):
     for path, method in [
         ("/system/browser", "GET"),
         ("/system/browser/install", "POST"),
+        ("/system/browser/releases", "GET"),
+        ("/system/browser/versions", "GET"),
         ("/system/updates", "GET"),
         ("/system/updates/prepare", "POST"),
     ]:
@@ -85,6 +91,42 @@ async def test_runtime_routes_use_existing_api_auth_guard(client, monkeypatch):
         assert response.status_code == 401
     installer.start.assert_not_called()
     installer.status.assert_not_called()
+
+
+async def test_browser_versions_list_what_a_profile_can_pin(client, monkeypatch):
+    versions = BrowserVersions(
+        global_version="155.0.8059.84-p1",
+        latest="156.0.8078.79-p1",
+        versions=[
+            BrowserVersion(
+                version="156.0.8078.79-p1",
+                installed=False,
+                published=True,
+                is_global=False,
+                is_latest=True,
+            ),
+            BrowserVersion(
+                version="155.0.8059.84-p1",
+                installed=True,
+                published=True,
+                is_global=True,
+                is_latest=False,
+            ),
+        ],
+    )
+    monkeypatch.setattr(runtime, "browser_versions", Mock(return_value=versions))
+    response = await client.get("/api/v1/system/browser/versions")
+    assert response.status_code == 200
+    body = response.json()["data"]
+    assert body["global_version"] == "155.0.8059.84-p1"
+    assert [v["version"] for v in body["versions"]] == ["156.0.8078.79-p1", "155.0.8059.84-p1"]
+    assert body["versions"][0] == {
+        "version": "156.0.8078.79-p1",
+        "installed": False,
+        "published": True,
+        "is_global": False,
+        "is_latest": True,
+    }
 
 
 async def test_update_check_failure_is_a_status_result_not_an_available_update(client, monkeypatch):

@@ -66,10 +66,11 @@ Create / update body (every field optional except `name` on create):
   over the exit and drops the position.
 - `webrtc_policy`: `default`, `default_public_interface_only`,
   `default_public_and_private_interfaces`, `disable_non_proxied_udp`.
-- `phasmid_version`: leave unset to launch with the newest installed Phasmid,
-  which the manager updates on start. A release tag (e.g. `155.0.8059.84-p1`)
-  pins the profile to it; a launch before that release is downloaded fails
-  with a message saying it is downloading.
+- `phasmid_version`: leave unset (or send `null` to unpin) to launch with the
+  global Phasmid, the newest installed, which the manager updates on start. A
+  version from `GET /system/browser/versions` (e.g. `155.0.8059.84-p1`) pins
+  the profile to it; one not installed is downloaded, and a launch before it
+  finishes fails with a message saying it is downloading.
 - `status` (update only): `active`, `inactive`, `blocked`, `maintenance`; bookkeeping.
 - `protected`: while true, `DELETE`, the Trash purge, `reset-fingerprint` and
   `reconcile-os` with `keep_machine: false` answer `409` with code `protected`.
@@ -151,7 +152,9 @@ POST   /trash/profiles/{id}/restore
 DELETE /trash/profiles/{id}?confirm=true      permanent; only when explicitly asked
 GET    /fingerprints/gpus?os=windows  data.gpus: [{os, gpu, renderer, weight}]
 GET    /system/browser                {installed, version, state: idle|downloading|ready|error, progress}
-POST   /system/browser/install        starts the download; poll GET until ready
+POST   /system/browser/install        starts the download (or update to the newest); poll GET until ready
+GET    /system/browser/releases       {current, latest, update_available, releases, installed}
+GET    /system/browser/versions       {global_version, latest, error, versions: [{version, installed, published, is_global, is_latest}]}
 ```
 
 Envelope endpoints (Trash, GPUs, system) wrap results as

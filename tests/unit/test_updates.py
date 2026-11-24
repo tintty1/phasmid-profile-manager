@@ -99,7 +99,7 @@ async def test_unpublished_or_prerelease_results_are_not_offered(github, flag):
     assert not result.available
 
 
-@pytest.mark.parametrize("status", [403, 404, 429, 503])
+@pytest.mark.parametrize("status", [403, 429, 503])
 async def test_github_http_failure_is_actionable_and_never_offers_a_download(github, status):
     github({"message": "failed"}, status=status)
     result = await updates.check_update()
@@ -122,3 +122,12 @@ async def test_malformed_github_json_is_treated_as_a_failed_check(github, payloa
     result = await updates.check_update()
     assert result.error
     assert not result.available
+
+
+async def test_no_published_release_yet_is_up_to_date_not_a_failure(github):
+    github({"message": "Not Found"}, status=404)
+    result = await updates.check_update()
+    assert result.error is None
+    assert not result.available
+    assert result.assets == []
+    assert result.release_url == updates.RELEASES

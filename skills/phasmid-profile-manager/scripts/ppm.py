@@ -9,10 +9,13 @@ Shell (stdlib only, prints JSON):
   ppm.py modes                         which launch modes this server offers
   ppm.py list [--search TEXT] [--group ID] [--status active]
   ppm.py get ID_OR_NAME
-  ppm.py create NAME [--os linux|windows] [--gpu 0x10de:0x2504]
+  ppm.py create NAME [--os linux|windows] [--gpu 0x10de:0x2504] [--browser VERSION]
                      [--proxy socks5://user:pass@host:port]
                      [--group ID] [--notes TEXT] [--protected] [--json '{...extra fields...}']
   ppm.py gpus [--os linux|windows]                     GPUs a new machine may claim
+  ppm.py versions                                      Phasmid versions a profile can pin
+  ppm.py pin ID_OR_NAME VERSION                        launch with that version, not the global one
+  ppm.py unpin ID_OR_NAME                              back to the global version
   ppm.py machine ID_OR_NAME                            the whole Phasmid profile JSON
   ppm.py protect ID_OR_NAME                            (refuse delete / new machine)
   ppm.py update ID_OR_NAME --json '{"notes": "..."}'   (sends row_version for you)
@@ -186,6 +189,37 @@ async def save_download(
     raise PpmError(408, "timeout", f"download {guid} did not reach the server in {timeout:.0f}s")
 
 
+def browser_versions() -> dict[str, Any]:
+    """``{global_version, latest, versions: [{version, installed, published, ...}], error}``."""
+    return request("GET", "/system/browser/versions")["data"]
+
+
+def check_version(version: str) -> None:
+    """Refuse a version the server has neither installed nor published."""
+    listed = browser_versions()
+    known = [item["version"] for item in listed["versions"]]
+    if version not in known:
+        hint = f" (GitHub unreachable: {listed['error']})" if listed.get("error") else ""
+        raise PpmError(
+            404,
+            "unknown_version",
+            f"Phasmid {version} is not installed or published{hint}. "
+            f"Available: {', '.join(known) or 'none'}",
+        )
+
+
+def set_browser_version(id_or_name: str, version: str | None) -> dict[str, Any]:
+    """Pin a profile to ``version``, or unpin it (None) so it follows the global version."""
+    if version is not None:
+        check_version(version)
+    profile = resolve(id_or_name)
+    body = {
+        "row_version": profile.get("row_version"),
+        "browser_settings": {"phasmid_version": version},
+    }
+    return request("PUT", f"/profiles/{profile['id']}", body)
+
+
 def parse_proxy(url: str) -> dict[str, Any]:
     """socks5://user:pass@host:port -> the API's proxy_config."""
     parts = urllib.parse.urlsplit(url)
@@ -252,6 +286,11 @@ def _main() -> None:
     sub.add_parser("active")
     sub.add_parser("gpus").add_argument("--os", choices=["linux", "windows"])
     sub.add_parser("trash")
+    sub.add_parser("versions")
+    p = sub.add_parser("pin")
+    p.add_argument("profile")
+    p.add_argument("version", help="a version from `ppm.py versions`")
+    sub.add_parser("unpin").add_argument("profile")
     p = sub.add_parser("clone")
     p.add_argument("profile")
     p.add_argument("new_name")
@@ -286,6 +325,7 @@ def _main() -> None:
     p.add_argument("name")
     p.add_argument("--os", choices=["linux", "windows"])
     p.add_argument("--gpu", help="vendor_id:device_id, from `ppm.py gpus`")
+    p.add_argument("--browser", help="pin a Phasmid version, from `ppm.py versions`")
     p.add_argument("--proxy")
     p.add_argument("--group")
     p.add_argument("--notes")
@@ -306,6 +346,12 @@ def _main() -> None:
             out = request("GET", "/browsers/active")
         elif args.cmd == "gpus":
             out = request("GET", "/fingerprints/gpus", os=args.os)["data"]["gpus"]
+        elif args.cmd == "versions":
+            out = browser_versions()
+        elif args.cmd == "pin":
+            out = set_browser_version(args.profile, args.version)
+        elif args.cmd == "unpin":
+            out = set_browser_version(args.profile, None)
         elif args.cmd == "machine":
             out = request("GET", f"/profiles/{resolve(args.profile)['id']}/machine")
         elif args.cmd == "list":
@@ -333,6 +379,9 @@ def _main() -> None:
                 body.setdefault("browser_settings", {})["os"] = args.os
             if args.gpu:
                 body.setdefault("browser_settings", {})["gpu"] = args.gpu
+            if args.browser:
+                check_version(args.browser)
+                body.setdefault("browser_settings", {})["phasmid_version"] = args.browser
             if args.proxy:
                 body["proxy_config"] = parse_proxy(args.proxy)
             if args.group:

@@ -18,6 +18,7 @@ import {
   LockOpen,
   Monitor,
   PackageOpen,
+  Pin,
   Pencil,
   Play,
   Plus,
@@ -55,19 +56,51 @@ import {
 } from '@/lib/api'
 import { copyText } from '@/lib/clipboard'
 
+/** The Phasmid release a profile launches with: its pin, or the global one. */
+function browserVersion(profile: Profile): string {
+  return profile.browser_settings?.phasmid_version || profile.fingerprint?.browser_version || ''
+}
+
+/** Orders release tags by their numbers, as the server does (155.0.8059.84-p2 > -p1). */
+function compareVersions(a: string, b: string): number {
+  const left = a.match(/\d+/g)?.map(Number) ?? []
+  const right = b.match(/\d+/g)?.map(Number) ?? []
+  for (let i = 0; i < Math.max(left.length, right.length); i++) {
+    const diff = (left[i] ?? -1) - (right[i] ?? -1)
+    if (diff) return diff
+  }
+  return 0
+}
+
+function BrowserCell({ profile }: { profile: Profile }) {
+  const pinned = profile.browser_settings?.phasmid_version
+  const version = browserVersion(profile)
+  if (!version) return <span className="text-ink-faint">—</span>
+  return (
+    <span
+      className="inline-flex items-center gap-1 font-mono text-ink-dim"
+      title={pinned ? `Pinned to Phasmid ${pinned}` : 'Global release: follows the newest installed'}
+    >
+      {pinned && <Pin size={11} className="text-signal" aria-label="Pinned" />}
+      {version}
+    </span>
+  )
+}
+
 const MODE_LABELS: Record<DisplayMode, { label: string; hint: string; icon: React.ReactNode }> = {
   headless: { label: 'Headless', hint: 'No window; for automation', icon: <EyeOff size={13} /> },
   virtual: { label: 'Virtual display', hint: 'Watch and use it here', icon: <Monitor size={13} /> },
   window: { label: 'Desktop window', hint: "On the server's own screen", icon: <AppWindow size={13} /> },
 }
 
-type SortKey = 'name' | 'id' | 'group' | 'os' | 'status' | 'last_used'
+type SortKey = 'name' | 'id' | 'group' | 'os' | 'browser' | 'status' | 'last_used'
 
 const COLUMNS: { key: SortKey; label: string; className?: string }[] = [
   { key: 'name', label: 'Name' },
   { key: 'id', label: 'ID' },
   { key: 'group', label: 'Group' },
   { key: 'os', label: 'OS' },
+  { key: 'browser', label: 'Browser' },
   { key: 'status', label: 'Status' },
   { key: 'last_used', label: 'Last used' },
 ]
@@ -219,6 +252,8 @@ export default function ProfilesPage() {
           ) * direction
         case 'os':
           return (a.browser_settings?.os ?? '').localeCompare(b.browser_settings?.os ?? '') * direction
+        case 'browser':
+          return compareVersions(browserVersion(a), browserVersion(b)) * direction
         case 'status':
           return a.status.localeCompare(b.status) * direction
         case 'last_used':
@@ -870,6 +905,9 @@ export default function ProfilesPage() {
                   </td>
                   <td className="py-2.5 pr-4 text-ink-dim">
                     {OS_LABELS[profile.browser_settings?.os ?? ''] ?? profile.browser_settings?.os}
+                  </td>
+                  <td className="py-2.5 pr-4">
+                    <BrowserCell profile={profile} />
                   </td>
                   <td className="py-2.5 pr-4">
                     <StatusCell
